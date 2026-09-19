@@ -1,0 +1,35 @@
+import {test,before,after} from 'node:test';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {mkdtemp,readFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+const dir=await mkdtemp(path.join(tmpdir(),'moura-test-'));
+const port=25000+Math.floor(Math.random()*15000);
+const base=`http://127.0.0.1:${port}`;
+let server;
+before(async()=>{server=spawn(process.execPath,['server.mjs'],{env:{...process.env,PORT:String(port),DATA_DIR:dir,DEMO_MODE:'1',META_APP_SECRET:'unit-test',META_VERIFY_TOKEN:'verify-test',EDITOR_PHONES:'5594984353652'},stdio:'ignore'});for(let i=0;i<80;i++){try{const r=await fetch(base+'/api/properties');if(r.ok)return;}catch{}await new Promise(resolve=>setTimeout(resolve,50));}throw Error('Servidor não iniciou');});
+after(async()=>{server?.kill();await rm(dir,{recursive:true,force:true});});
+const say=async(text,photo)=>{const r=await fetch(base+'/api/demo',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text,photo})});assert.equal(r.status,200);return r.json();};
+const list=async()=> (await (await fetch(base+'/api/properties')).json()).properties;
+const tinyPng='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/V7sAAAAASUVORK5CYII=';
+test('rascunho, validação, publicação, edição e pausa',async()=>{
+ assert.match((await say('NOVO')).reply,/Novo rascunho/);
+ assert.match((await say('PUBLICAR')).reply,/Faltam/);
+ assert.match((await say('Título: Casa Teste\nFinalidade: venda\nTipo: casa\nBairro: Centro\nPreço: 430000\nQuartos: 3')).reply,/430.000/);
+ assert.match((await say('PUBLICAR')).reply,/foto/);
+ await say('',tinyPng);assert.match((await say('PUBLICAR')).reply,/CONFIRMAR/);
+ assert.equal((await list()).length,0);
+ const published=await say('CONFIRMAR');assert.match(published.reply,/Publicado/);
+ const [item]=await list();assert.equal(item.preco,430000);assert.equal(item.photos.length,1);
+ assert.match((await say(`EDITAR ${item.id}`)).reply,/Editando/);
+ await say('Preço: 450000');assert.equal((await list())[0].preco,430000);
+ await say('PUBLICAR');await say('CONFIRMAR');assert.equal((await list())[0].preco,450000);
+ await say(`PAUSAR ${item.id}`);assert.equal((await list()).length,0);
+ await say(`ATIVAR ${item.id}`);assert.equal((await list()).length,1);
+ const saved=JSON.parse(await readFile(path.join(dir,'catalog.json'),'utf8'));assert.equal(saved.properties.length,1);
+});
+test('simulador não é acessível sem credenciais de rede e webhook rejeita assinatura errada',async()=>{
+ const r=await fetch(base+'/webhooks/whatsapp',{method:'POST',headers:{'x-hub-signature-256':'sha256=wrong'},body:'{}'});assert.equal(r.status,401);
+ const verify=await fetch(base+'/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=verify-test&hub.challenge=ok');assert.equal(await verify.text(),'ok');
+});

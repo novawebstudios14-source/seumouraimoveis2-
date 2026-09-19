@@ -52,13 +52,12 @@ if(ownerForm){
 const search=$('#search');
 if(search){
   const controls=['purpose','location','type','bedrooms'].map(id=>$('#'+id)).filter(Boolean);
-  const items=[...document.querySelectorAll('.property-item')];
   const count=$('#result-count'),empty=$('#empty'),clear=$('#clear');
   const matches=(item,key,value)=>value==='all'||item.dataset[key].split(' ').includes(value);
   const filter=()=>{
     const values=Object.fromEntries(controls.map(control=>[control.id,control.value]));
     let visible=0;
-    items.forEach(item=>{
+    document.querySelectorAll('.property-item').forEach(item=>{
       const roomMatch=values.bedrooms==='all'||Number(item.dataset.bedrooms)>=Number(values.bedrooms);
       const match=matches(item,'purpose',values.purpose)&&matches(item,'location',values.location)&&matches(item,'type',values.type)&&roomMatch;
       item.hidden=!match;

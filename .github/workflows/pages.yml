@@ -23,7 +23,7 @@ jobs:
       - name: Prepare static website
         run: |
           mkdir -p _site
-          cp index.html imoveis.html styles.css app.js favicon.svg _site/
+          cp index.html imoveis.html styles.css app.js catalog-live.js favicon.svg _site/
           cp -R assets _site/assets
       - uses: actions/upload-pages-artifact@v3
         with:
