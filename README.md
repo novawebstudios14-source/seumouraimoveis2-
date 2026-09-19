@@ -2,7 +2,7 @@
 
 Site responsivo para a Seu Moura Imóveis, com catálogo, filtros, galeria acessível, menu mobile, animações com suporte a movimento reduzido e contatos pelo WhatsApp. O experimento de cadastro pelo WhatsApp está neste **repositório de testes**, separado do site principal.
 
-## Cadastro de imóveis pelo WhatsApp (teste)
+## Ambiente de homologação\n\nSite com serviço Node e volume persistente: https://site-whatsapp-production.up.railway.app/ (catálogo: https://site-whatsapp-production.up.railway.app/imoveis.html). O webhook ainda requer a ativação da conta oficial WhatsApp Business Platform; nenhuma mensagem real é recebida até configurar os segredos Meta. O repositório principal não foi alterado.\n\n## Cadastro de imóveis pelo WhatsApp (teste)
 
 O serviço `server.mjs` recebe mensagens pela API oficial do WhatsApp Business, aceita dados enviados em várias mensagens e até 20 fotos por anúncio, mantém o rascunho, pede confirmação e publica no catálogo em `imoveis.html`. Somente números cadastrados em `EDITOR_PHONES` podem criar ou alterar anúncios. O número de atendimento dos compradores continua separado.
 
