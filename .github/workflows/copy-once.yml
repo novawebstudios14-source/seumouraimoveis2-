@@ -1,0 +1,22 @@
+name: Copy seumouraimoveis once
+on:
+  push:
+    paths:
+      - .github/workflows/copy-once.yml
+permissions:
+  contents: write
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Copy source and preserve both histories
+        run: |
+          git remote add source https://github.com/novawebstudios14-source/seumouraimoveis.git
+          git fetch source main
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" merge --allow-unrelated-histories --no-commit -s ours source/main
+          git read-tree --reset -u source/main
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Copiar conteúdo e histórico de seumouraimoveis"
+          git push origin HEAD:main
