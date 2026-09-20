@@ -62,3 +62,18 @@ O formulário abre o WhatsApp com uma mensagem preenchida; o visitante revisa e 
 ## Verificação local
 
 Sirva o diretório com qualquer servidor HTTP estático. Não há dependências de build. Valide JavaScript com `node --check app.js`.
+
+## Cadastro pelo navegador (ambiente de testes)
+
+Abra `/admin.html` no domínio do serviço Node. Cada anúncio pede título, finalidade, tipo, bairro, preço e ao menos uma foto. Permite editar, pausar e republicar. As fotos são reduzidas no navegador, verificadas no servidor e armazenadas no volume `DATA_DIR`. Não use o endereço estático do GitHub Pages para este painel.
+
+O acesso exige usuário, senha e **dois códigos de seis dígitos**, um enviado por e-mail via Resend e outro por SMS via Twilio. Sem todas as variáveis abaixo, o login recusa tentativas; não há caminho de emergência sem verificação:
+
+| Variável | Uso |
+| --- | --- |
+| `ADMIN_USER`, `ADMIN_PASSWORD`, `SESSION_SECRET` | Credenciais e segredo aleatório de sessão |
+| `OTP_EMAIL`, `OTP_PHONE` | Destinatários autorizados dos códigos |
+| `RESEND_API_KEY`, `OTP_FROM_EMAIL` | Envio de e-mail (remetente validado no provedor) |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_PHONE` | Envio de SMS (número remetente habilitado no provedor) |
+
+Os códigos expiram após cinco minutos e têm limite de tentativas. A sessão tem cookie HttpOnly/Secure/SameSite e expira após oito horas. O servidor confere origem, token contra falsificação de requisições, tamanho e assinatura de arquivos e limita tentativas de login, códigos e alterações. Configure `NODE_ENV=production`, HTTPS e backup do volume.
