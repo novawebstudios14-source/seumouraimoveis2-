@@ -21,4 +21,4 @@ function addProperty(property){
   body.append(heading,price,details,link);article.append(media,body);
   grid.append(article);
 }
-if(grid){fetch('./api/properties').then(r=>r.ok?r.json():null).then(data=>{if(!data?.properties)return;for(const property of data.properties)addProperty(property);document.querySelector('#search')?.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));}).catch(()=>{});}
+if(grid){fetch('./api/properties',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(data=>{if(!data?.properties)return;grid.replaceChildren();for(const property of data.properties)addProperty(property);document.querySelector('#search')?.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));}).catch(()=>{});}
