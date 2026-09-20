@@ -18,6 +18,8 @@ test('login com senha limita tentativas, protege publicações e encerra sessão
     const login=await request('login',{username:'gestor',password:'long-test-password'});assert.equal(login.status,200);
     const {csrf}=await login.json(),cookie=login.headers.get('set-cookie').split(';')[0];assert.ok(csrf);assert.match(login.headers.get('set-cookie'),/HttpOnly/);
     const blocked=await request('properties',{fields:{},photos:[]},cookie);assert.equal(blocked.status,403);
+    const aiStatus=await (await fetch(base+'/api/admin/ai-config',{headers:{Cookie:cookie}})).json();assert.equal(aiStatus.configured,false);
+    const badKey=await request('ai-config',{key:'invalid'},cookie,csrf);assert.equal(badKey.status,400);
     const unauthorizedDescription=await request('description',{fields:{tipo:'Casa',bairro:'Centro'}});assert.equal(unauthorizedDescription.status,401);
     const descriptionResponse=await request('description',{fields:{tipo:'Casa',bairro:'Centro',cidade:'Marabá',finalidade:'venda',quartos:'3',preco:'120000'}},cookie,csrf);
     assert.equal(descriptionResponse.status,200);const draft=await descriptionResponse.json();assert.equal(draft.source,'automatic');assert.match(draft.description,/Casa à venda no bairro Centro, em Marabá/);assert.match(draft.description,/3 quartos/);
