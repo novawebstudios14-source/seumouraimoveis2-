@@ -15,7 +15,7 @@
       const detail='./imovel.html?id='+encodeURIComponent(item.id);
       const purpose=String(item.finalidade||'venda').toLowerCase()==='aluguel'?'PARA ALUGAR':'À VENDA';
       const priceLabel=String(item.finalidade||'venda').toLowerCase()==='aluguel'?'ALUGUEL MENSAL':'VALOR DE VENDA';
-      const location=[item.bairro,item.cidade].filter(Boolean).join(' · ');
+      const propertyLocation=[item.bairro,item.cidade].filter(Boolean).join(' · ');
       const message='Olá, Seu Moura! Tenho interesse no imóvel '+(item.titulo||'anunciado')+', anunciado por '+money(item.preco)+'. Gostaria de saber mais.';
       root.innerHTML=`
         <div class="featured-card">
@@ -27,11 +27,11 @@
           <div class="featured-info">
             <p class="listing-type">${purpose}</p>
             <h3><a href="${detail}">${escape(item.titulo||'Imóvel em destaque')}</a></h3>
-            <p class="listing-location">${escape(location)}</p>
+            <p class="listing-location">${escape(propertyLocation)}</p>
             <div class="catalog-price"><span>${priceLabel}</span><strong>${money(item.preco)}</strong></div>
             <div class="featured-actions">
               <a class="button catalog-details-button" href="${detail}">Ver imóvel completo <span aria-hidden="true">→</span></a>
-              <a class="button cream" href="https://wa.me/5594992972083?text=${encodeURIComponent(message+'\\n\\nVer imóvel: '+new URL(detail,location.href).href)}" target="_blank" rel="noopener">Tenho interesse <span aria-hidden="true">↗</span></a>
+              <a class="button cream" href="https://wa.me/5594992972083?text=${encodeURIComponent(message+'\\n\\nVer imóvel: '+new URL(detail,window.location.href).href)}" target="_blank" rel="noopener">Tenho interesse <span aria-hidden="true">↗</span></a>
             </div>
             <p class="fine">Valor e disponibilidade sujeitos à confirmação.</p>
           </div>
