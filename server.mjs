@@ -57,14 +57,14 @@ function descriptionFrom(f){
   lines.push('Entre em contato para saber mais e agendar uma visita.');return lines.join(' ');
 }
 const unsupportedAiClaims=[
-  {claim:/\\b(escola|colégio|creche|universidade)s?\\b/i,evidence:/\\b(escola|colégio|creche|universidade)s?\\b/i},
-  {claim:/\\b(supermercado|farmácia|hospital|shopping|comércio|serviços|transporte público)s?\\b/i,evidence:/\\b(supermercado|farmácia|hospital|shopping|comércio|serviços|transporte público)s?\\b/i},
-  {claim:/\\b(próxim[oa]|perto|a poucos minutos|nas proximidades|fácil acesso|bem localizad[oa])\\b/i,evidence:/\\b(próxim[oa]|perto|minutos|proximidades|acesso|localizad[oa])\\b/i},
-  {claim:/\\b(localização privilegiada|região valorizada|bairro valorizado|área nobre)\\b/i,evidence:/\\b(privilegiad[oa]|valorizad[oa]|área nobre)\\b/i},
-  {claim:/\\b(segur[oa]|segurança|tranquilidade|bairro tranquilo)\\b/i,evidence:/\\b(segur[oa]|segurança|tranquil[oa])\\b/i},
-  {claim:/\\b(financiamento|financiável|documentação em dia|escritura)\\b/i,evidence:/\\b(financiamento|financiável|documentação|escritura)\\b/i},
-  {claim:/\\b(vaga|garagem|suíte|varanda|sacada|quintal|piscina|churrasqueira|mobiliad[oa])s?\\b/i,evidence:/\\b(vaga|garagem|suíte|varanda|sacada|quintal|piscina|churrasqueira|mobiliad[oa])s?\\b/i},
-  {claim:/\\b(acabamento|reformad[oa]|novo|pronto para morar|ventilad[oa]|iluminad[oa])\\b/i,evidence:/\\b(acabamento|reformad[oa]|novo|pronto para morar|ventilad[oa]|iluminad[oa])\\b/i}
+  {claim:/\b(escola|colégio|creche|universidade)s?\b/i,evidence:/\b(escola|colégio|creche|universidade)s?\b/i},
+  {claim:/\b(supermercado|farmácia|hospital|shopping|comércio|serviços|transporte público)s?\b/i,evidence:/\b(supermercado|farmácia|hospital|shopping|comércio|serviços|transporte público)s?\b/i},
+  {claim:/\b(próxim[oa]|perto|a poucos minutos|nas proximidades|fácil acesso|bem localizad[oa])\b/i,evidence:/\b(próxim[oa]|perto|minutos|proximidades|acesso|localizad[oa])\b/i},
+  {claim:/\b(localização privilegiada|região valorizada|bairro valorizado|área nobre)\b/i,evidence:/\b(privilegiad[oa]|valorizad[oa]|área nobre)\b/i},
+  {claim:/\b(segur[oa]|segurança|tranquilidade|bairro tranquilo)\b/i,evidence:/\b(segur[oa]|segurança|tranquil[oa])\b/i},
+  {claim:/\b(financiamento|financiável|documentação em dia|escritura)\b/i,evidence:/\b(financiamento|financiável|documentação|escritura)\b/i},
+  {claim:/\b(vaga|garagem|suíte|varanda|sacada|quintal|piscina|churrasqueira|mobiliad[oa])s?\b/i,evidence:/\b(vaga|garagem|suíte|varanda|sacada|quintal|piscina|churrasqueira|mobiliad[oa])s?\b/i},
+  {claim:/\b(acabamento|reformad[oa]|novo|pronto para morar|ventilad[oa]|iluminad[oa])\b/i,evidence:/\b(acabamento|reformad[oa]|novo|pronto para morar|ventilad[oa]|iluminad[oa])\b/i}
 ];
 function unsupportedDescriptionClaim(description,f){
   const evidence=Object.values(f).filter(value=>value!==undefined&&value!==null&&value!=='').join(' ');
