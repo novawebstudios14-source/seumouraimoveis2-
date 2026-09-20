@@ -247,3 +247,17 @@ em{font-family:inherit;font-style:normal;font-size:1em;font-weight:500}
 .founder-play:hover,.founder-play:focus-visible{background:#ffad4f;transform:translate(-50%,-50%) scale(1.06)}
 .founder-play.is-hidden{opacity:0;pointer-events:none;transform:translate(-50%,-50%) scale(.86)}
 @media(max-width:720px){.founder-play{width:86px;height:86px}.founder-play span{border-top-width:15px;border-bottom-width:15px;border-left-width:25px}}
+
+
+/* Branded video controls */
+.founder-video video{cursor:pointer}
+.founder-video:fullscreen{display:grid;place-items:center;background:#000;border:0;box-shadow:none}
+.founder-video:fullscreen video{height:100%;width:100%;object-fit:contain}
+.founder-controls{position:absolute;z-index:5;left:12px;right:12px;bottom:12px;min-height:56px;padding:9px 12px;display:grid;grid-template-columns:38px auto minmax(80px,1fr) 38px 80px 38px;align-items:center;gap:10px;color:#fff;background:#111e;border:1px solid #ffffff24;box-shadow:0 8px 24px #0008;backdrop-filter:blur(10px)}
+.founder-controls button{width:38px;height:38px;padding:0;border:0;border-radius:50%;display:grid;place-items:center;background:transparent;color:#fff;font:700 16px/1 var(--sans);transition:background .18s,color .18s}.founder-controls button:hover,.founder-controls button:focus-visible{background:#ff971e;color:#191919}
+.video-time{font-size:11px;font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums}
+.video-progress,.video-volume{appearance:none;height:4px;margin:0;border:0;border-radius:99px;outline:0;background:linear-gradient(90deg,#ff971e 0 var(--video-progress,0%),#ffffff50 var(--video-progress,0%) 100%);cursor:pointer}
+.video-volume{background:linear-gradient(90deg,#ff971e 0 100%,#ffffff50 100%)}
+.video-progress::-webkit-slider-thumb,.video-volume::-webkit-slider-thumb{appearance:none;width:14px;height:14px;border-radius:50%;background:#ff971e;border:2px solid #fff;box-shadow:0 2px 8px #0008}
+.video-progress::-moz-range-thumb,.video-volume::-moz-range-thumb{width:11px;height:11px;border-radius:50%;background:#ff971e;border:2px solid #fff}
+@media(max-width:720px){.founder-controls{left:8px;right:8px;bottom:8px;grid-template-columns:34px auto minmax(55px,1fr) 34px 34px;gap:6px;padding:7px 8px;min-height:50px}.founder-controls button{width:34px;height:34px}.video-volume{display:none}.video-time{font-size:10px}}
