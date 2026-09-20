@@ -1,6 +1,6 @@
 import http from 'node:http';
 import {readFile,writeFile,mkdir,rename,stat} from 'node:fs/promises';
-import {createHmac,timingSafeEqual,randomUUID} from 'node:crypto';
+import {createHmac,timingSafeEqual,randomUUID,scryptSync,randomBytes} from 'node:crypto';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
@@ -19,6 +19,27 @@ const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=u
 const fields=['titulo','finalidade','tipo','bairro','cidade','preco','quartos','banheiros','area','descricao'];
 const required=['titulo','finalidade','tipo','bairro','preco'];
 const labels={titulo:'Título',finalidade:'Finalidade (venda ou aluguel)',tipo:'Tipo',bairro:'Bairro',cidade:'Cidade',preco:'Preço em reais',quartos:'Quartos',banheiros:'Banheiros',area:'Área em m²',descricao:'Descrição'};
+const adminPassword=process.env.ADMIN_PASSWORD||'';
+const sessionSecret=process.env.SESSION_SECRET||'';
+const adminUser=process.env.ADMIN_USER||'admin';
+const passwordSalt=sessionSecret?createHmac('sha256',sessionSecret).update('password-salt').digest():Buffer.alloc(32);
+const passwordHash=adminPassword?scryptSync(adminPassword,passwordSalt,64):Buffer.alloc(64);
+const sessions=new Map(), attempts=new Map();
+const challenges=new Map();
+const secureCookie=process.env.NODE_ENV==='production';
+const otpReady=()=>['OTP_EMAIL','OTP_PHONE','RESEND_API_KEY','OTP_FROM_EMAIL','TWILIO_ACCOUNT_SID','TWILIO_AUTH_TOKEN','TWILIO_FROM_PHONE'].every(k=>!!process.env[k]);
+async function sendCodes(emailCode,phoneCode){
+  const email=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:`Bearer ${process.env.RESEND_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({from:process.env.OTP_FROM_EMAIL,to:[process.env.OTP_EMAIL],subject:'Código de acesso · Seu Moura',text:`Seu código para entrar no cadastro de imóveis: ${emailCode}. Válido por 5 minutos.`})});
+  if(!email.ok)throw Error('Não foi possível enviar o código por e-mail');
+  const auth=Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
+  const sms=await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(process.env.TWILIO_ACCOUNT_SID)}/Messages.json`,{method:'POST',headers:{Authorization:`Basic ${auth}`,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({To:process.env.OTP_PHONE,From:process.env.TWILIO_FROM_PHONE,Body:`Seu Moura: codigo de acesso ${phoneCode}. Valido por 5 minutos.`})});
+  if(!sms.ok)throw Error('Não foi possível enviar o código por SMS');
+}
+function equal(a,b){const x=Buffer.from(String(a)),y=Buffer.from(String(b));return x.length===y.length&&timingSafeEqual(x,y);}
+function originOK(req){const origin=req.headers.origin;const host=req.headers.host;return !!origin&&!!host&&new URL(origin).host===host&&(origin.startsWith('https://')||!secureCookie);}
+function session(req){const token=(req.headers.cookie||'').match(/(?:^|;\s*)moura_session=([a-f0-9]{64})/)?.[1];if(!token)return null;const entry=sessions.get(createHmac('sha256',sessionSecret).update(token).digest('hex'));if(!entry)return null;if(entry.expires<Date.now()){sessions.delete(createHmac('sha256',sessionSecret).update(token).digest('hex'));return null;}return entry;}
+function throttle(key,max,period){const now=Date.now(),entry=attempts.get(key);if(!entry||entry.until<now){attempts.set(key,{count:1,until:now+period});return false;}entry.count++;return entry.count>max;}
+function adminGuard(req,res){if(!adminPassword||!sessionSecret){send(res,503,{error:'Cadastro ainda não configurado'});return null;}const current=session(req);if(!current){send(res,401,{error:'Entre na sua conta novamente'});return null;}if(req.method!=='GET'&&(!originOK(req)||!equal(req.headers['x-csrf-token']||'',current.csrf))){send(res,403,{error:'Solicitação não autorizada'});return null;}return current;}
 let state={properties:[],drafts:{},seen:[]};
 let queue=Promise.resolve();
 
@@ -84,12 +105,81 @@ async function webhook(req,res){if(!appSecret)return send(res,503,{error:'Config
 }
 async function handler(req,res){try{
   const url=new URL(req.url,'http://localhost');
+  if(url.pathname.startsWith('/api/admin/')){
+    res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Frame-Options','DENY');
+    if(url.pathname==='/api/admin/login'&&req.method==='POST'){
+      if(!adminPassword||!sessionSecret||!otpReady())return send(res,503,{error:'Verificação por e-mail e SMS ainda não configurada'});
+      const ip=req.socket.remoteAddress||'unknown';
+      if(throttle('login:'+ip,8,15*60_000))return send(res,429,{error:'Muitas tentativas. Aguarde 15 minutos.'});
+      if(!originOK(req))return send(res,403,{error:'Origem inválida'});
+      const input=JSON.parse((await body(req,2048)).toString('utf8'));
+      const incoming=scryptSync(String(input.password||'').slice(0,256),passwordSalt,64);
+      if(!equal(input.username||'',adminUser)||!timingSafeEqual(incoming,passwordHash))return send(res,401,{error:'Dados de acesso inválidos'});
+      const id=randomBytes(24).toString('hex'),emailCode=String(randomBytes(4).readUInt32BE()%1_000_000).padStart(6,'0'),phoneCode=String(randomBytes(4).readUInt32BE()%1_000_000).padStart(6,'0');
+      challenges.set(id,{email:createHmac('sha256',sessionSecret).update(id+emailCode).digest('hex'),phone:createHmac('sha256',sessionSecret).update(id+phoneCode).digest('hex'),expires:Date.now()+5*60_000,tries:0,ip});
+      try{await sendCodes(emailCode,phoneCode);}catch(error){challenges.delete(id);return send(res,502,{error:error.message});}
+      return send(res,200,{challenge:id});
+    }
+    if(url.pathname==='/api/admin/verify'&&req.method==='POST'){
+      if(!originOK(req))return send(res,403,{error:'Origem inválida'});
+      if(throttle('verify:'+(req.socket.remoteAddress||'unknown'),12,15*60_000))return send(res,429,{error:'Muitas tentativas. Aguarde 15 minutos.'});
+      const input=JSON.parse((await body(req,1024)).toString('utf8'));
+      const challenge=challenges.get(String(input.challenge||''));
+      if(!challenge||challenge.expires<Date.now()||challenge.ip!==req.socket.remoteAddress||++challenge.tries>5){challenges.delete(String(input.challenge||''));return send(res,401,{error:'Códigos expirados. Entre novamente.'});}
+      const digest=(code)=>createHmac('sha256',sessionSecret).update(String(input.challenge)+String(code)).digest('hex');
+      if(!/^[0-9]{6}$/.test(input.emailCode)||!/^[0-9]{6}$/.test(input.phoneCode)||!equal(digest(input.emailCode),challenge.email)||!equal(digest(input.phoneCode),challenge.phone))return send(res,401,{error:'Códigos incorretos'});
+      challenges.delete(input.challenge);attempts.delete('login:'+challenge.ip);
+      const token=randomBytes(32).toString('hex'),csrf=randomBytes(32).toString('hex');
+      sessions.set(createHmac('sha256',sessionSecret).update(token).digest('hex'),{csrf,expires:Date.now()+8*60*60_000});
+      res.setHeader('Set-Cookie',`moura_session=${token}; HttpOnly; SameSite=Strict; Path=/api/admin; Max-Age=28800${secureCookie?'; Secure':''}`);
+      return send(res,200,{csrf});
+    }
+    const current=adminGuard(req,res);if(!current)return;
+    if(req.method!=='GET'&&throttle('admin-write:'+(req.socket.remoteAddress||'unknown'),40,60_000))return send(res,429,{error:'Muitas alterações. Aguarde um minuto.'});
+    if(url.pathname==='/api/admin/session'&&req.method==='GET')return send(res,200,{csrf:current.csrf});
+    if(url.pathname==='/api/admin/logout'&&req.method==='POST'){
+      const token=(req.headers.cookie||'').match(/moura_session=([a-f0-9]{64})/)?.[1];if(token)sessions.delete(createHmac('sha256',sessionSecret).update(token).digest('hex'));
+      res.setHeader('Set-Cookie',`moura_session=; HttpOnly; SameSite=Strict; Path=/api/admin; Max-Age=0${secureCookie?'; Secure':''}`);return send(res,200,{ok:true});
+    }
+    if(url.pathname==='/api/admin/properties'&&req.method==='GET')return send(res,200,{properties:state.properties});
+    if(url.pathname==='/api/admin/properties'&&req.method==='POST'){
+      if(throttle('upload:'+(req.socket.remoteAddress||'unknown'),30,60_000))return send(res,429,{error:'Muitas solicitações. Aguarde um minuto.'});
+      const input=JSON.parse((await body(req,16*1024*1024)).toString('utf8'));
+      if(!input||typeof input!=='object'||!input.fields||typeof input.fields!=='object')return send(res,400,{error:'Dados inválidos'});
+      const f={};for(const key of fields)f[key]=safeText(input.fields[key],key==='descricao'?1000:160);
+      if(!['venda','aluguel'].includes(f.finalidade))return send(res,400,{error:'Finalidade inválida'});
+      f.preco=Number(f.preco);if(!Number.isFinite(f.preco)||f.preco<=0||f.preco>1e10)return send(res,400,{error:'Preço inválido'});
+      for(const key of ['quartos','banheiros','area']){if(f[key]===''){delete f[key];continue;}const n=Number(f[key]);if(!Number.isFinite(n)||n<0||n>100000)return send(res,400,{error:`${labels[key]} inválido`});f[key]=n;}
+      if(missing(f).length)return send(res,400,{error:'Preencha os campos obrigatórios'});
+      const id=typeof input.id==='string'&&/^[a-f0-9-]{8,36}$/.test(input.id)?input.id:null;
+      const existing=id?state.properties.find(p=>p.id===id):null;if(id&&!existing)return send(res,404,{error:'Imóvel não encontrado'});
+      const photos=Array.isArray(input.photos)?input.photos:[];
+      if(photos.length>20||!photos.length&&!existing)return send(res,400,{error:'Envie de 1 a 20 fotos'});
+      if((existing?.photos.length||0)+photos.length>20)return send(res,400,{error:'Limite de 20 fotos por imóvel'});
+      const saved=[];
+      for(const item of photos){if(typeof item!=='string'||item.length>14*1024*1024)return send(res,400,{error:'Foto inválida'});const match=item.match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/);if(!match)throw Error('Envie JPG, PNG ou WebP');saved.push(await storePhoto(Buffer.from(match[2],'base64'),{jpeg:'jpg',png:'png',webp:'webp'}[match[1]]));}
+      const item={id:existing?.id||randomUUID(),owner:existing?.owner||'admin',fields:f,photos:[...(existing?.photos||[]),...saved].slice(0,20),status:existing?.status||'published',updatedAt:new Date().toISOString()};
+      if(existing)Object.assign(existing,item);else state.properties.push(item);
+      await save();return send(res,200,{item});
+    }
+    if(url.pathname==='/api/admin/status'&&req.method==='POST'){
+      const input=JSON.parse((await body(req,1024)).toString('utf8'));
+      if(!['published','pausar','vendido','alugado'].includes(input.status))return send(res,400,{error:'Status inválido'});
+      const item=state.properties.find(p=>p.id===input.id);if(!item)return send(res,404,{error:'Imóvel não encontrado'});
+      item.status=input.status;item.updatedAt=new Date().toISOString();await save();return send(res,200,{ok:true});
+    }
+    return send(res,404,{error:'Não encontrado'});
+  }
   if(url.pathname==='/webhooks/whatsapp'&&req.method==='GET'){if(!process.env.META_VERIFY_TOKEN)return send(res,503,{error:'Token de verificação ausente'});return url.searchParams.get('hub.mode')==='subscribe'&&url.searchParams.get('hub.verify_token')===process.env.META_VERIFY_TOKEN?send(res,200,url.searchParams.get('hub.challenge')||'','text/plain'):send(res,403,{error:'Verificação inválida'});}
   if(url.pathname==='/webhooks/whatsapp'&&req.method==='POST')return await webhook(req,res);
   if(url.pathname==='/api/properties'&&req.method==='GET')return send(res,200,{properties:state.properties.filter(p=>p.status==='published').map(({id,fields,photos,updatedAt})=>({id,...fields,photos,updatedAt}))});
   if(url.pathname==='/api/demo'&&req.method==='POST'){if(!preview||!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress))return send(res,404,{error:'Indisponível'});const input=JSON.parse((await body(req,14*1024*1024)).toString('utf8'));const sender='5594000000000';allowed.add(sender);let photo=null;if(input.photo){const match=String(input.photo).match(/^data:image\/(jpeg|png|webp);base64,(.+)$/s);if(!match)throw Error('Imagem inválida');photo=await storePhoto(Buffer.from(match[2],'base64'),{jpeg:'jpg',png:'png',webp:'webp'}[match[1]]);}const response=await processMessage(sender,input.text||'',photo,randomUUID());return send(res,200,{reply:response,draft:state.drafts[sender]||null});}
   if(req.method!=='GET')return send(res,405,{error:'Método não permitido'});
   if(url.pathname==='/simulador.html'&&(!preview||!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress)))return send(res,404,{error:'Indisponível'});
+  if(url.pathname==='/admin.html'||url.pathname==='/admin.js'){
+    res.setHeader('Cache-Control','no-store');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Frame-Options','DENY');
+    res.setHeader('Content-Security-Policy',"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+  }
   let filename;
   if(url.pathname.startsWith('/media/'))filename=path.join(mediaDir,path.basename(url.pathname));
   else {const pathname=decodeURIComponent(url.pathname==='/'?'/index.html':url.pathname);filename=path.resolve(root,'.'+pathname);if(!filename.startsWith(root+path.sep)||filename.startsWith(dataDir+path.sep)||path.basename(filename).startsWith('.')||!['.html','.css','.js','.svg','.jpg','.jpeg','.png','.webp','.mov'].includes(path.extname(filename)))return send(res,404,{error:'Não encontrado'});}
