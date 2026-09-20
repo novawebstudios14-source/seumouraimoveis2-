@@ -18,7 +18,7 @@ const phoneId=process.env.WHATSAPP_PHONE_NUMBER_ID||'';
 const apiVersion=process.env.META_API_VERSION||'v23.0';
 const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.webp':'image/webp','.mov':'video/quicktime','.json':'application/json; charset=utf-8'};
 const fields=['titulo','finalidade','tipo','bairro','cidade','preco','quartos','banheiros','area','descricao'];
-const required=['titulo','finalidade','tipo','bairro','preco'];
+const required=['titulo','finalidade','tipo','bairro','cidade','preco','quartos','banheiros','area','descricao'];
 const labels={titulo:'Título',finalidade:'Finalidade (venda ou aluguel)',tipo:'Tipo',bairro:'Bairro',cidade:'Cidade',preco:'Preço em reais',quartos:'Quartos',banheiros:'Banheiros',area:'Área em m²',descricao:'Descrição'};
 const adminPassword=process.env.ADMIN_PASSWORD||'';
 const sessionSecret=process.env.SESSION_SECRET||'';
@@ -87,7 +87,7 @@ async function generatedDescription(f){
     return {description,source:'ai'};
   }catch(error){console.error('Gerador de descrição indisponível:',error.message);return {description:descriptionFrom(facts),source:'automatic'};}finally{clearTimeout(timer);}
 }
-function missing(d){return required.filter(k=>!d[k]);}
+function missing(d){return required.filter(k=>d[k]===undefined||d[k]===null||String(d[k]).trim()==='');}
 function summary(d){return `${d.titulo||'(sem título)'}\n${d.finalidade||'?'} · ${d.tipo||'?'} · ${d.bairro||'?'}${d.cidade?', '+d.cidade:''}\n${d.preco?'R$ '+Number(d.preco).toLocaleString('pt-BR'):'Preço pendente'} · ${d.photos.length} foto(s)`;}
 function newDraft(){return {fields:{cidade:'Marabá'},photos:[],status:'draft'};}
 function execute(sender,text,photo){
@@ -200,8 +200,8 @@ async function handler(req,res){try{
       const propertyTypes=new Set(['Casa','Apartamento','Terreno','Chácara','Fazenda','Kitnet','Condomínio','Prédio comercial','Sala comercial','Galpão','Ponto comercial']);
       if(!propertyTypes.has(f.tipo))return send(res,400,{error:'Selecione um tipo de imóvel válido'});
       for(const key of ['quartos','banheiros']){if(f[key]===''){delete f[key];continue;}const n=Number(f[key]);if(!Number.isInteger(n)||n<0||n>9)return send(res,400,{error:`${labels[key]} deve estar entre 0 e 9`});f[key]=n;}
-      if(f.area==='')delete f.area;else{const n=Number(f.area);if(!Number.isFinite(n)||n<0||n>100000)return send(res,400,{error:'Área inválida'});f.area=n;}
-      if(missing(f).length)return send(res,400,{error:'Preencha os campos obrigatórios'});
+      if(f.area==='')return send(res,400,{error:'Informe a área do imóvel'});else{const n=Number(String(f.area).replace(',','.'));if(!Number.isFinite(n)||n<=0||n>100000)return send(res,400,{error:'Área inválida'});f.area=n;}
+      const absent=missing(f);if(absent.length)return send(res,400,{error:'Preencha: '+absent.map(key=>labels[key]).join(', ')});
       const id=typeof input.id==='string'&&/^[a-f0-9-]{8,36}$/.test(input.id)?input.id:null;
       const existing=id?state.properties.find(p=>p.id===id):null;if(id&&!existing)return send(res,404,{error:'Imóvel não encontrado'});
       const photos=Array.isArray(input.photos)?input.photos:[];
