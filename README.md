@@ -67,13 +67,8 @@ Sirva o diretório com qualquer servidor HTTP estático. Não há dependências 
 
 Abra `/admin.html` no domínio do serviço Node. Cada anúncio pede título, finalidade, tipo, bairro, preço e ao menos uma foto. Permite editar, pausar e republicar. As fotos são reduzidas no navegador, verificadas no servidor e armazenadas no volume `DATA_DIR`. Não use o endereço estático do GitHub Pages para este painel.
 
-O acesso exige usuário, senha e **dois códigos de seis dígitos**, um enviado por e-mail via Resend e outro por SMS via Twilio. Sem todas as variáveis abaixo, o login recusa tentativas; não há caminho de emergência sem verificação:
+O acesso exige usuário, senha e um código gerado localmente por um aplicativo autenticador no celular. Nenhuma conta de e-mail/SMS ou conexão com a Meta é necessária. No primeiro acesso, a chave do autenticador aparece após a senha correta; ao inserir o primeiro código, a configuração é concluída e oito códigos de recuperação são exibidos uma única vez. Guarde-os fora do site. A chave não aparece novamente.
 
-| Variável | Uso |
-| --- | --- |
-| `ADMIN_USER`, `ADMIN_PASSWORD`, `SESSION_SECRET` | Credenciais e segredo aleatório de sessão |
-| `OTP_EMAIL`, `OTP_PHONE` | Destinatários autorizados dos códigos |
-| `RESEND_API_KEY`, `OTP_FROM_EMAIL` | Envio de e-mail (remetente validado no provedor) |
-| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_PHONE` | Envio de SMS (número remetente habilitado no provedor) |
+Configure `ADMIN_USER`, `ADMIN_PASSWORD`, `SESSION_SECRET` (segredo aleatório com pelo menos 32 bytes) e `TOTP_SECRET` (20 bytes aleatórios em hexadecimal) no serviço, nunca no repositório. Guarde `data/catalog.json` e o volume, pois também contêm o estado do autenticador e os hashes dos códigos de recuperação. Se trocar `TOTP_SECRET`, será necessário reconfigurar o autenticador com um procedimento de recuperação supervisionado.
 
-Os códigos expiram após cinco minutos e têm limite de tentativas. A sessão tem cookie HttpOnly/Secure/SameSite e expira após oito horas. O servidor confere origem, token contra falsificação de requisições, tamanho e assinatura de arquivos e limita tentativas de login, códigos e alterações. Configure `NODE_ENV=production`, HTTPS e backup do volume.
+O código muda a cada 30 segundos, tolera pequena diferença de relógio e não pode ser usado duas vezes. A sessão usa cookie HttpOnly/Secure/SameSite com validade de oito horas. O servidor confere origem, token contra falsificação de requisições, tamanho e assinatura de arquivos e limita tentativas de login, códigos e alterações. Configure `NODE_ENV=production`, HTTPS e backup do volume.
