@@ -236,7 +236,7 @@ async function handler(req,res){try{
   let filename;
   if(url.pathname.startsWith('/media/'))filename=path.join(mediaDir,path.basename(url.pathname));
   else {const pathname=decodeURIComponent(url.pathname==='/'?'/index.html':url.pathname);filename=path.resolve(root,'.'+pathname);if(!filename.startsWith(root+path.sep)||filename.startsWith(dataDir+path.sep)||path.basename(filename).startsWith('.')||!['.html','.css','.js','.svg','.jpg','.jpeg','.png','.webp','.mov'].includes(path.extname(filename)))return send(res,404,{error:'Não encontrado'});}
-  const file=await readFile(filename);res.writeHead(200,{'content-type':mime[path.extname(filename)]||'application/octet-stream','x-content-type-options':'nosniff'});res.end(file);
+  const file=await readFile(filename),extension=path.extname(filename);const headers={'content-type':mime[extension]||'application/octet-stream','x-content-type-options':'nosniff'};if(['.html','.js','.css'].includes(extension))headers['cache-control']='no-store';else headers['cache-control']='public, max-age=3600';res.writeHead(200,headers);res.end(file);
 }catch(error){console.error(error);send(res,error.code==='ENOENT'?404:400,{error:error.message||'Erro inesperado'});}}
 const server=http.createServer((req,res)=>{if(req.url?.startsWith('/api/admin/description')){handler(req,res).catch(console.error);return;}queue=queue.then(()=>handler(req,res)).catch(console.error);});
 server.listen(port,()=>{console.log(`Seu Moura: http://localhost:${port}`);checkGroq().catch(console.error);});
