@@ -67,8 +67,6 @@ Sirva o diretório com qualquer servidor HTTP estático. Não há dependências 
 
 Abra `/admin.html` no domínio do serviço Node. Cada anúncio pede título, finalidade, tipo, bairro, preço e ao menos uma foto. Permite editar, pausar e republicar. As fotos são reduzidas no navegador, verificadas no servidor e armazenadas no volume `DATA_DIR`. Não use o endereço estático do GitHub Pages para este painel.
 
-O acesso exige usuário, senha e um código gerado localmente por um aplicativo autenticador no celular. Nenhuma conta de e-mail/SMS ou conexão com a Meta é necessária. No primeiro acesso, a chave do autenticador aparece após a senha correta; ao inserir o primeiro código, a configuração é concluída e oito códigos de recuperação são exibidos uma única vez. Guarde-os fora do site. A chave não aparece novamente.
+O acesso exige apenas `ADMIN_USER` e `ADMIN_PASSWORD`; `SESSION_SECRET` é necessário para proteger as sessões. Configure os três como variáveis do servidor (nunca no repositório). Não é necessário aplicativo autenticador, e-mail ou SMS.
 
-Configure `ADMIN_USER`, `ADMIN_PASSWORD`, `SESSION_SECRET` (segredo aleatório com pelo menos 32 bytes) e `TOTP_SECRET` (20 bytes aleatórios em hexadecimal) no serviço, nunca no repositório. Guarde `data/catalog.json` e o volume, pois também contêm o estado do autenticador e os hashes dos códigos de recuperação. Se trocar `TOTP_SECRET`, será necessário reconfigurar o autenticador com um procedimento de recuperação supervisionado.
-
-O código muda a cada 30 segundos, tolera pequena diferença de relógio e não pode ser usado duas vezes. A sessão usa cookie HttpOnly/Secure/SameSite com validade de oito horas. O servidor confere origem, token contra falsificação de requisições, tamanho e assinatura de arquivos e limita tentativas de login, códigos e alterações. Configure `NODE_ENV=production`, HTTPS e backup do volume.
+O servidor limita tentativas de login e alterações, verifica a origem e um token contra falsificação de requisições, confere tamanho e assinatura das fotos e usa cookie HttpOnly/Secure/SameSite com validade de oito horas. Configure `NODE_ENV=production`, HTTPS e backup do volume.
