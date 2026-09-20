@@ -35,11 +35,13 @@ function adminGuard(req,res){if(!adminPassword||!sessionSecret){send(res,503,{er
 let state={properties:[],drafts:{},seen:[]};
 let queue=Promise.resolve();
 let groqKey='';
+let groqModel=process.env.GROQ_DESCRIPTION_MODEL||'llama-3.3-70b-versatile';
 
 async function save(){await mkdir(dataDir,{recursive:true});const tmp=dataFile+'.'+randomUUID();await writeFile(tmp,JSON.stringify(state,null,2));await rename(tmp,dataFile);}
 try{state={...state,...JSON.parse(await readFile(dataFile,'utf8'))};}catch(error){if(error.code!=='ENOENT')throw error;}
 if(process.env.SESSION_SECRET){try{const sealed=Buffer.from(await readFile(aiKeyFile,'utf8'),'base64');const decipher=createDecipheriv('aes-256-gcm',createHash('sha256').update(process.env.SESSION_SECRET).digest(),sealed.subarray(0,12));decipher.setAuthTag(sealed.subarray(12,28));groqKey=Buffer.concat([decipher.update(sealed.subarray(28)),decipher.final()]).toString('utf8');}catch(error){if(error.code!=='ENOENT')console.error('Chave Groq armazenada não pôde ser carregada');}}
 async function saveGroqKey(key){const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',createHash('sha256').update(sessionSecret).digest(),iv);const encrypted=Buffer.concat([cipher.update(key,'utf8'),cipher.final()]);await mkdir(dataDir,{recursive:true});const tmp=aiKeyFile+'.'+randomUUID();await writeFile(tmp,Buffer.concat([iv,cipher.getAuthTag(),encrypted]).toString('base64'),{mode:0o600,flag:'wx'});await rename(tmp,aiKeyFile);groqKey=key;}
+async function checkGroq(){const key=process.env.GROQ_API_KEY||groqKey;if(!key)return;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);try{const response=await fetch('https://api.groq.com/openai/v1/models',{headers:{Authorization:`Bearer ${key}`},signal:controller.signal});if(!response.ok){console.error('Groq: chave ou serviço indisponível, HTTP',response.status);return;}const data=await response.json();const ids=new Set((data.data||[]).map(x=>x.id));if(!ids.has(groqModel)&&!process.env.GROQ_DESCRIPTION_MODEL){groqModel=['llama-3.1-8b-instant','openai/gpt-oss-20b'].find(id=>ids.has(id))||groqModel;}console.log(ids.has(groqModel)?`Groq: modelo ${groqModel} disponível`:'Groq: modelo configurado indisponível');}catch(error){console.error('Groq: não foi possível verificar conexão',error.name);}finally{clearTimeout(timer);}}
 
 function normalizePrice(value){const text=String(value).trim().replace(/\s|R\$/gi,'');if(!/^\d[\d.,]*$/.test(text))return null;const clean=text.includes(',')?text.replace(/\./g,'').replace(',','.'):text.replace(/\./g,'');const number=Number(clean);return Number.isFinite(number)&&number>0&&number<=1e10?number:null;}
 function safeText(value,max=500){return String(value??'').trim().slice(0,max);}
@@ -56,7 +58,7 @@ async function generatedDescription(f){
   if(!key)return {description:descriptionFrom(f),source:'automatic'};
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);
   try{
-    const response=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',signal:controller.signal,headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify({model:process.env.GROQ_DESCRIPTION_MODEL||'llama-3.3-70b-versatile',max_completion_tokens:240,temperature:0.3,messages:[{role:'system',content:'Escreva uma descrição curta de anúncio imobiliário em português brasileiro, com até 650 caracteres. Use SOMENTE os fatos fornecidos no JSON. Não invente características, localização, facilidades, acabamento, documentação, financiamento ou condições. Sem emojis, markdown, hashtags ou promessa de valorização. Se algum dado estiver ausente, não o mencione. Retorne somente o texto final.'},{role:'user',content:JSON.stringify(f)}]})});
+    const response=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',signal:controller.signal,headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify({model:groqModel,max_completion_tokens:240,temperature:0.3,messages:[{role:'system',content:'Escreva uma descrição curta de anúncio imobiliário em português brasileiro, com até 650 caracteres. Use SOMENTE os fatos fornecidos no JSON. Não invente características, localização, facilidades, acabamento, documentação, financiamento ou condições. Sem emojis, markdown, hashtags ou promessa de valorização. Se algum dado estiver ausente, não o mencione. Retorne somente o texto final.'},{role:'user',content:JSON.stringify(f)}]})});
     if(!response.ok)throw Error('Falha ao gerar texto com IA');
     const data=await response.json(),description=safeText(String(data.choices?.[0]?.message?.content||'').replace(/\s+/g,' '),650);
     if(!description)throw Error('Resposta vazia da IA');return {description,source:'ai'};
@@ -206,4 +208,4 @@ async function handler(req,res){try{
   const file=await readFile(filename);res.writeHead(200,{'content-type':mime[path.extname(filename)]||'application/octet-stream','x-content-type-options':'nosniff'});res.end(file);
 }catch(error){console.error(error);send(res,error.code==='ENOENT'?404:400,{error:error.message||'Erro inesperado'});}}
 const server=http.createServer((req,res)=>{if(req.url?.startsWith('/api/admin/description')){handler(req,res).catch(console.error);return;}queue=queue.then(()=>handler(req,res)).catch(console.error);});
-server.listen(port,()=>console.log(`Seu Moura: http://localhost:${port}`));
+server.listen(port,()=>{console.log(`Seu Moura: http://localhost:${port}`);checkGroq().catch(console.error);});
