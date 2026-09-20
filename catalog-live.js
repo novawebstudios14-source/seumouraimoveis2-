@@ -1,5 +1,4 @@
 'use strict';
-// Interface do catálogo sincronizada com o Railway.
 const grid=document.querySelector('#catalog-grid');
 const BRL=new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0});
 function addProperty(property){
