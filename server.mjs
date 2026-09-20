@@ -197,7 +197,10 @@ async function handler(req,res){try{
       const f={};for(const key of fields)f[key]=safeText(input.fields[key],key==='descricao'?1000:160);
       if(!['venda','aluguel'].includes(f.finalidade))return send(res,400,{error:'Finalidade inválida'});
       f.preco=normalizePrice(f.preco);if(f.preco===null)return send(res,400,{error:'Preço inválido. Informe, por exemplo, 450.000 ou 450000.'});
-      for(const key of ['quartos','banheiros','area']){if(f[key]===''){delete f[key];continue;}const n=Number(f[key]);if(!Number.isFinite(n)||n<0||n>100000)return send(res,400,{error:`${labels[key]} inválido`});f[key]=n;}
+      const propertyTypes=new Set(['Casa','Apartamento','Terreno','Chácara','Fazenda','Kitnet','Condomínio','Prédio comercial','Sala comercial','Galpão','Ponto comercial']);
+      if(!propertyTypes.has(f.tipo))return send(res,400,{error:'Selecione um tipo de imóvel válido'});
+      for(const key of ['quartos','banheiros']){if(f[key]===''){delete f[key];continue;}const n=Number(f[key]);if(!Number.isInteger(n)||n<0||n>9)return send(res,400,{error:`${labels[key]} deve estar entre 0 e 9`});f[key]=n;}
+      if(f.area==='')delete f.area;else{const n=Number(f.area);if(!Number.isFinite(n)||n<0||n>100000)return send(res,400,{error:'Área inválida'});f.area=n;}
       if(missing(f).length)return send(res,400,{error:'Preencha os campos obrigatórios'});
       const id=typeof input.id==='string'&&/^[a-f0-9-]{8,36}$/.test(input.id)?input.id:null;
       const existing=id?state.properties.find(p=>p.id===id):null;if(id&&!existing)return send(res,404,{error:'Imóvel não encontrado'});
