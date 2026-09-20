@@ -1,5 +1,5 @@
 import http from 'node:http';
-import {readFile,writeFile,mkdir,rename,stat} from 'node:fs/promises';
+import {readFile,writeFile,mkdir,rename,stat,unlink} from 'node:fs/promises';
 import {createHmac,timingSafeEqual,randomUUID,scryptSync,randomBytes,createHash,createCipheriv,createDecipheriv} from 'node:crypto';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -180,13 +180,15 @@ async function handler(req,res){try{
       const id=typeof input.id==='string'&&/^[a-f0-9-]{8,36}$/.test(input.id)?input.id:null;
       const existing=id?state.properties.find(p=>p.id===id):null;if(id&&!existing)return send(res,404,{error:'Imóvel não encontrado'});
       const photos=Array.isArray(input.photos)?input.photos:[];
-      if(photos.length>20||!photos.length&&!existing)return send(res,400,{error:'Envie de 1 a 20 fotos'});
-      if((existing?.photos.length||0)+photos.length>20)return send(res,400,{error:'Limite de 20 fotos por imóvel'});
+      const removed=Array.isArray(input.removePhotos)?input.removePhotos:[];
+      if(removed.some(src=>typeof src!=='string'||!existing?.photos.includes(src)))return send(res,400,{error:'Foto removida inválida'});
+      const kept=(existing?.photos||[]).filter(src=>!removed.includes(src));
+      if(kept.length+photos.length<1||kept.length+photos.length>20)return send(res,400,{error:'Envie de 1 a 20 fotos'});
       const saved=[];
       for(const item of photos){if(typeof item!=='string'||item.length>14*1024*1024)return send(res,400,{error:'Foto inválida'});const match=item.match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/);if(!match)throw Error('Envie JPG, PNG ou WebP');saved.push(await storePhoto(Buffer.from(match[2],'base64'),{jpeg:'jpg',png:'png',webp:'webp'}[match[1]]));}
-      const item={id:existing?.id||randomUUID(),owner:existing?.owner||'admin',fields:f,photos:[...(existing?.photos||[]),...saved].slice(0,20),status:existing?.status||'published',updatedAt:new Date().toISOString()};
+      const item={id:existing?.id||randomUUID(),owner:existing?.owner||'admin',fields:f,photos:[...kept,...saved],status:existing?.status||'published',updatedAt:new Date().toISOString()};
       if(existing)Object.assign(existing,item);else state.properties.push(item);
-      await save();return send(res,200,{item});
+      await save();for(const src of removed){if(!kept.includes(src)&&src.startsWith('/media/'))await unlink(path.join(mediaDir,path.basename(src))).catch(()=>{});}return send(res,200,{item});
     }
     if(url.pathname==='/api/admin/status'&&req.method==='POST'){
       const input=JSON.parse((await body(req,1024)).toString('utf8'));
