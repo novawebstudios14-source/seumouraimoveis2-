@@ -27,14 +27,11 @@ const passwordHash=adminPassword?scryptSync(adminPassword,passwordSalt,64):Buffe
 const sessions=new Map(), attempts=new Map();
 const challenges=new Map();
 const secureCookie=process.env.NODE_ENV==='production';
-const otpReady=()=>['OTP_EMAIL','OTP_PHONE','RESEND_API_KEY','OTP_FROM_EMAIL','TWILIO_ACCOUNT_SID','TWILIO_AUTH_TOKEN','TWILIO_FROM_PHONE'].every(k=>!!process.env[k]);
-async function sendCodes(emailCode,phoneCode){
-  const email=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:`Bearer ${process.env.RESEND_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({from:process.env.OTP_FROM_EMAIL,to:[process.env.OTP_EMAIL],subject:'Código de acesso · Seu Moura',text:`Seu código para entrar no cadastro de imóveis: ${emailCode}. Válido por 5 minutos.`})});
-  if(!email.ok)throw Error('Não foi possível enviar o código por e-mail');
-  const auth=Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
-  const sms=await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(process.env.TWILIO_ACCOUNT_SID)}/Messages.json`,{method:'POST',headers:{Authorization:`Basic ${auth}`,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({To:process.env.OTP_PHONE,From:process.env.TWILIO_FROM_PHONE,Body:`Seu Moura: codigo de acesso ${phoneCode}. Valido por 5 minutos.`})});
-  if(!sms.ok)throw Error('Não foi possível enviar o código por SMS');
-}
+const totpSeed=/^[a-f0-9]{40,128}$/i.test(process.env.TOTP_SECRET||'')?Buffer.from(process.env.TOTP_SECRET,'hex'):null;
+function base32(bytes){const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';let out='',buffer=0,bits=0;for(const byte of bytes){buffer=(buffer<<8)|byte;bits+=8;while(bits>=5){out+=alphabet[(buffer>>>(bits-=5))&31];}}if(bits)out+=alphabet[(buffer<<(5-bits))&31];return out;}
+function totpAt(step){const counter=Buffer.alloc(8);counter.writeBigUInt64BE(BigInt(step));const hash=createHmac('sha1',totpSeed).update(counter).digest();const offset=hash[19]&15;return String((hash.readUInt32BE(offset)&0x7fffffff)%1_000_000).padStart(6,'0');}
+function codeStep(code){if(!/^[0-9]{6}$/.test(code))return null;const now=Math.floor(Date.now()/30000);for(let step=now-1;step<=now+1;step++)if(equal(totpAt(step),code)&&step>(state.lastTotpStep??-1))return step;return null;}
+function recoveryHash(code){return createHmac('sha256',sessionSecret).update('recovery:'+code).digest('hex');}
 function equal(a,b){const x=Buffer.from(String(a)),y=Buffer.from(String(b));return x.length===y.length&&timingSafeEqual(x,y);}
 function originOK(req){const origin=req.headers.origin;const host=req.headers.host;return !!origin&&!!host&&new URL(origin).host===host&&(origin.startsWith('https://')||!secureCookie);}
 function session(req){const token=(req.headers.cookie||'').match(/(?:^|;\s*)moura_session=([a-f0-9]{64})/)?.[1];if(!token)return null;const entry=sessions.get(createHmac('sha256',sessionSecret).update(token).digest('hex'));if(!entry)return null;if(entry.expires<Date.now()){sessions.delete(createHmac('sha256',sessionSecret).update(token).digest('hex'));return null;}return entry;}
@@ -108,31 +105,40 @@ async function handler(req,res){try{
   if(url.pathname.startsWith('/api/admin/')){
     res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Frame-Options','DENY');
     if(url.pathname==='/api/admin/login'&&req.method==='POST'){
-      if(!adminPassword||!sessionSecret||!otpReady())return send(res,503,{error:'Verificação por e-mail e SMS ainda não configurada'});
+      if(!adminPassword||!sessionSecret||!totpSeed)return send(res,503,{error:'Acesso seguro ainda não configurado'});
       const ip=req.socket.remoteAddress||'unknown';
       if(throttle('login:'+ip,8,15*60_000))return send(res,429,{error:'Muitas tentativas. Aguarde 15 minutos.'});
       if(!originOK(req))return send(res,403,{error:'Origem inválida'});
       const input=JSON.parse((await body(req,2048)).toString('utf8'));
       const incoming=scryptSync(String(input.password||'').slice(0,256),passwordSalt,64);
       if(!equal(input.username||'',adminUser)||!timingSafeEqual(incoming,passwordHash))return send(res,401,{error:'Dados de acesso inválidos'});
-      const id=randomBytes(24).toString('hex'),emailCode=String(randomBytes(4).readUInt32BE()%1_000_000).padStart(6,'0'),phoneCode=String(randomBytes(4).readUInt32BE()%1_000_000).padStart(6,'0');
-      challenges.set(id,{email:createHmac('sha256',sessionSecret).update(id+emailCode).digest('hex'),phone:createHmac('sha256',sessionSecret).update(id+phoneCode).digest('hex'),expires:Date.now()+5*60_000,tries:0,ip});
-      try{await sendCodes(emailCode,phoneCode);}catch(error){challenges.delete(id);return send(res,502,{error:error.message});}
-      return send(res,200,{challenge:id});
+      const id=randomBytes(24).toString('hex');
+      challenges.set(id,{expires:Date.now()+5*60_000,tries:0,ip});
+      const secret=base32(totpSeed);
+      return send(res,200,{challenge:id,...(!state.totpEnrolled?{setup:{secret,uri:`otpauth://totp/Seu%20Moura%20Im%C3%B3veis:gestor?secret=${secret}&issuer=Seu%20Moura%20Im%C3%B3veis&algorithm=SHA1&digits=6&period=30`}}:{})});
     }
     if(url.pathname==='/api/admin/verify'&&req.method==='POST'){
+      if(!adminPassword||!sessionSecret||!totpSeed)return send(res,503,{error:'Acesso seguro ainda não configurado'});
       if(!originOK(req))return send(res,403,{error:'Origem inválida'});
       if(throttle('verify:'+(req.socket.remoteAddress||'unknown'),12,15*60_000))return send(res,429,{error:'Muitas tentativas. Aguarde 15 minutos.'});
       const input=JSON.parse((await body(req,1024)).toString('utf8'));
       const challenge=challenges.get(String(input.challenge||''));
       if(!challenge||challenge.expires<Date.now()||challenge.ip!==req.socket.remoteAddress||++challenge.tries>5){challenges.delete(String(input.challenge||''));return send(res,401,{error:'Códigos expirados. Entre novamente.'});}
-      const digest=(code)=>createHmac('sha256',sessionSecret).update(String(input.challenge)+String(code)).digest('hex');
-      if(!/^[0-9]{6}$/.test(input.emailCode)||!/^[0-9]{6}$/.test(input.phoneCode)||!equal(digest(input.emailCode),challenge.email)||!equal(digest(input.phoneCode),challenge.phone))return send(res,401,{error:'Códigos incorretos'});
+      const code=String(input.code||'').trim().toUpperCase();
+      const step=codeStep(code);
+      const recoveryIndex=state.totpEnrolled&&Array.isArray(state.recoveryHashes)?state.recoveryHashes.findIndex(hash=>equal(hash,recoveryHash(code))):-1;
+      if(step===null&&recoveryIndex<0)return send(res,401,{error:'Código incorreto ou já utilizado'});
+      if(!state.totpEnrolled&&step===null)return send(res,401,{error:'Configure o aplicativo autenticador antes de entrar'});
+      if(step!==null)state.lastTotpStep=step;
+      if(recoveryIndex>=0)state.recoveryHashes.splice(recoveryIndex,1);
+      let recoveryCodes;
+      if(!state.totpEnrolled){recoveryCodes=Array.from({length:8},()=>randomBytes(8).toString('hex').toUpperCase());state.recoveryHashes=recoveryCodes.map(recoveryHash);state.totpEnrolled=true;}
+      await save();
       challenges.delete(input.challenge);attempts.delete('login:'+challenge.ip);
       const token=randomBytes(32).toString('hex'),csrf=randomBytes(32).toString('hex');
       sessions.set(createHmac('sha256',sessionSecret).update(token).digest('hex'),{csrf,expires:Date.now()+8*60*60_000});
       res.setHeader('Set-Cookie',`moura_session=${token}; HttpOnly; SameSite=Strict; Path=/api/admin; Max-Age=28800${secureCookie?'; Secure':''}`);
-      return send(res,200,{csrf});
+      return send(res,200,{csrf,...(recoveryCodes?{recoveryCodes}:{})});
     }
     const current=adminGuard(req,res);if(!current)return;
     if(req.method!=='GET'&&throttle('admin-write:'+(req.socket.remoteAddress||'unknown'),40,60_000))return send(res,429,{error:'Muitas alterações. Aguarde um minuto.'});
