@@ -95,3 +95,22 @@ if(dialog){
   $('#next').addEventListener('click',()=>showPhoto(currentPhoto+1));
   dialog.addEventListener('keydown',event=>{if(event.key==='ArrowRight')showPhoto(currentPhoto+1);if(event.key==='ArrowLeft')showPhoto(currentPhoto-1);});
 }
+
+
+const founderVideo=document.querySelector('.founder-video video');
+const founderPlay=document.querySelector('.founder-play');
+if(founderVideo&&founderPlay){
+  const updateFounderPlay=()=>{
+    const playing=!founderVideo.paused&&!founderVideo.ended;
+    founderPlay.classList.toggle('is-hidden',playing);
+    founderPlay.setAttribute('aria-label',playing?'Pausar vídeo':'Reproduzir vídeo');
+  };
+  founderPlay.addEventListener('click',()=>{
+    if(founderVideo.paused||founderVideo.ended)founderVideo.play();
+    else founderVideo.pause();
+  });
+  founderVideo.addEventListener('play',updateFounderPlay);
+  founderVideo.addEventListener('pause',updateFounderPlay);
+  founderVideo.addEventListener('ended',updateFounderPlay);
+  updateFounderPlay();
+}
