@@ -56,11 +56,11 @@ function descriptionFrom(f){
 async function generatedDescription(f){
   const key=process.env.GROQ_API_KEY||groqKey;
   if(!key)return {description:descriptionFrom(f),source:'automatic'};
-  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),25000);
   try{
-    const response=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',signal:controller.signal,headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify({model:groqModel,max_completion_tokens:450,temperature:0.3,...(groqModel.startsWith('openai/gpt-oss-')?{reasoning_effort:'low'}:{}),messages:[{role:'system',content:'Escreva uma descrição curta de anúncio imobiliário em português brasileiro, com até 650 caracteres. Use SOMENTE os fatos fornecidos no JSON. Não invente características, localização, facilidades, acabamento, documentação, financiamento ou condições. Sem emojis, markdown, hashtags ou promessa de valorização. Se algum dado estiver ausente, não o mencione. Retorne somente o texto final.'},{role:'user',content:JSON.stringify(f)}]})});
+    const response=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',signal:controller.signal,headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify({model:groqModel,max_completion_tokens:900,temperature:0.55,...(groqModel.startsWith('openai/gpt-oss-')?{reasoning_effort:'low'}:{}),messages:[{role:'system',content:'Você é um redator imobiliário brasileiro. Escreva um anúncio natural, envolvente e bem escrito, em 2 ou 3 parágrafos, com no máximo 950 caracteres. Abra com um convite contextualizado à moradia ou ao uso do imóvel, desenvolva os ambientes e diferenciais realmente informados e encerre com um convite para conhecer o imóvel. Use o título e os detalhes adicionais fornecidos para enriquecer o texto. NÃO faça uma ficha técnica, enumeração de dados ou mera paráfrase repetitiva dos campos. Mencione área, quartos, banheiros, localização e preço apenas quando ajudarem a leitura, sem repetir os mesmos números. Só afirme fatos explicitamente presentes no JSON: não invente vagas, suítes, varanda, proximidade de serviços, segurança, acabamentos, documentação, financiamento ou qualquer característica não informada. Se os dados forem escassos, escreva um anúncio proporcionalmente mais curto e não preencha lacunas com suposições. Não use emojis, markdown ou hashtags. Retorne somente a descrição pronta.'},{role:'user',content:JSON.stringify(f)}]})});
     if(!response.ok)throw Error('Falha ao gerar texto com IA');
-    const data=await response.json(),description=safeText(String(data.choices?.[0]?.message?.content||'').replace(/\s+/g,' '),650);
+    const data=await response.json(),description=safeText(String(data.choices?.[0]?.message?.content||'').replace(/[ \t]+/g,' ').trim(),950);
     if(!description)throw Error('Resposta vazia da IA');return {description,source:'ai'};
   }catch(error){console.error('Gerador de descrição indisponível:',error.message);return {description:descriptionFrom(f),source:'automatic'};}finally{clearTimeout(timer);}
 }
@@ -161,6 +161,7 @@ async function handler(req,res){try{
       const input=JSON.parse((await body(req,4096)).toString('utf8'));
       if(!input||typeof input!=='object'||!input.fields||typeof input.fields!=='object')return send(res,400,{error:'Preencha os dados do imóvel'});
       const f={};for(const key of fields)if(key!=='descricao')f[key]=safeText(input.fields[key],160);
+      f.detalhes=safeText(input.fields.detalhes,800);
       if(!f.tipo&&!f.bairro&&!f.titulo)return send(res,400,{error:'Informe ao menos o tipo, título ou bairro do imóvel'});
       return send(res,200,await generatedDescription(f));
     }
