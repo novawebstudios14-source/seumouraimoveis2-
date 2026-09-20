@@ -18,8 +18,11 @@ test('login com senha limita tentativas, protege publicações e encerra sessão
     const login=await request('login',{username:'gestor',password:'long-test-password'});assert.equal(login.status,200);
     const {csrf}=await login.json(),cookie=login.headers.get('set-cookie').split(';')[0];assert.ok(csrf);assert.match(login.headers.get('set-cookie'),/HttpOnly/);
     const blocked=await request('properties',{fields:{},photos:[]},cookie);assert.equal(blocked.status,403);
+    const unauthorizedDescription=await request('description',{fields:{tipo:'Casa',bairro:'Centro'}});assert.equal(unauthorizedDescription.status,401);
+    const descriptionResponse=await request('description',{fields:{tipo:'Casa',bairro:'Centro',cidade:'Marabá',finalidade:'venda',quartos:'3',preco:'120000'}},cookie,csrf);
+    assert.equal(descriptionResponse.status,200);const draft=await descriptionResponse.json();assert.equal(draft.source,'automatic');assert.match(draft.description,/Casa à venda no bairro Centro, em Marabá/);assert.match(draft.description,/3 quartos/);
     const photo='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/V7sAAAAASUVORK5CYII=';
-    const published=await request('properties',{fields:{titulo:'Casa',finalidade:'venda',tipo:'Casa',bairro:'Centro',preco:'120000'},photos:[photo]},cookie,csrf);
+    const published=await request('properties',{fields:{titulo:'Casa',finalidade:'venda',tipo:'Casa',bairro:'Centro',preco:'120000',descricao:draft.description},photos:[photo]},cookie,csrf);
     assert.equal(published.status,200,await published.text());
     assert.equal((await (await fetch(base+'/api/properties')).json()).properties.length,1);
     const logout=await request('logout',{},cookie,csrf);assert.equal(logout.status,200);
