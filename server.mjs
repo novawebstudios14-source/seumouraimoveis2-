@@ -152,8 +152,10 @@ async function handler(req,res){try{
       if(throttle('login:'+ip,8,15*60_000))return send(res,429,{error:'Muitas tentativas. Aguarde 15 minutos.'});
       if(!originOK(req))return send(res,403,{error:'Origem inválida'});
       const input=JSON.parse((await body(req,2048)).toString('utf8'));
-      const incoming=scryptSync(String(input.password||'').slice(0,256),passwordSalt,64);
-      if(!equal(input.username||'',adminUser)||!timingSafeEqual(incoming,passwordHash))return send(res,401,{error:'Dados de acesso inválidos'});
+      const submittedUser=String(input.username||'').trim();
+      const submittedPassword=String(input.password||'').trim().slice(0,256);
+      const incoming=scryptSync(submittedPassword,passwordSalt,64);
+      if(!equal(submittedUser,adminUser.trim())||!timingSafeEqual(incoming,passwordHash))return send(res,401,{error:'Dados de acesso inválidos'});
       attempts.delete('login:'+ip);
       const token=randomBytes(32).toString('hex'),csrf=randomBytes(32).toString('hex');
       sessions.set(createHmac('sha256',sessionSecret).update(token).digest('hex'),{csrf,expires:Date.now()+8*60*60_000});
