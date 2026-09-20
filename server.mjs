@@ -39,6 +39,24 @@ try{state={...state,...JSON.parse(await readFile(dataFile,'utf8'))};}catch(error
 
 function normalizePrice(value){const text=String(value).trim().replace(/\s|R\$/gi,'');if(!/^\d[\d.,]*$/.test(text))return null;const clean=text.includes(',')?text.replace(/\./g,'').replace(',','.'):text.replace(/\./g,'');const number=Number(clean);return Number.isFinite(number)&&number>0&&number<=1e10?number:null;}
 function safeText(value,max=500){return String(value??'').trim().slice(0,max);}
+function descriptionFrom(f){
+  const kind=f.tipo||'imóvel',place=[f.bairro?`no bairro ${f.bairro}`:'',f.cidade?`em ${f.cidade}`:''].filter(Boolean).join(', ');
+  const lines=[`${kind.charAt(0).toUpperCase()+kind.slice(1)} ${f.finalidade==='aluguel'?'para alugar':'à venda'}${place?' '+place:''}.`];
+  const details=[];if(f.area)details.push(`${f.area} m²`);if(f.quartos)details.push(`${f.quartos} quarto${Number(f.quartos)===1?'':'s'}`);if(f.banheiros)details.push(`${f.banheiros} banheiro${Number(f.banheiros)===1?'':'s'}`);
+  if(details.length)lines.push(`O imóvel conta com ${details.join(', ')}.`);
+  if(f.preco&&Number(f.preco)>0)lines.push(`Valor anunciado: ${Number(f.preco).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}.`);
+  lines.push('Entre em contato para saber mais e agendar uma visita.');return lines.join(' ');
+}
+async function generatedDescription(f){
+  if(!process.env.OPENAI_API_KEY)return {description:descriptionFrom(f),source:'automatic'};
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);
+  try{
+    const response=await fetch('https://api.openai.com/v1/responses',{method:'POST',signal:controller.signal,headers:{Authorization:`Bearer ${process.env.OPENAI_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({model:process.env.OPENAI_DESCRIPTION_MODEL||'gpt-4.1-mini',max_output_tokens:250,store:false,instructions:'Escreva uma descrição curta de anúncio imobiliário em português brasileiro, com até 650 caracteres. Use SOMENTE os fatos fornecidos no JSON. Não invente características, localização, facilidades, acabamento, documentação, financiamento ou condições. Sem emojis, markdown, hashtags ou promessa de valorização. Se algum dado estiver ausente, não o mencione. Retorne somente o texto final.',input:JSON.stringify(f)})});
+    if(!response.ok)throw Error('Falha ao gerar texto com IA');
+    const data=await response.json(),description=safeText((data.output||[]).flatMap(o=>o.content||[]).filter(c=>c.type==='output_text').map(c=>c.text).join(' ').replace(/\s+/g,' '),650);
+    if(!description)throw Error('Resposta vazia da IA');return {description,source:'ai'};
+  }catch(error){console.error('Gerador de descrição indisponível:',error.message);return {description:descriptionFrom(f),source:'automatic'};}finally{clearTimeout(timer);}
+}
 function missing(d){return required.filter(k=>!d[k]);}
 function summary(d){return `${d.titulo||'(sem título)'}\n${d.finalidade||'?'} · ${d.tipo||'?'} · ${d.bairro||'?'}${d.cidade?', '+d.cidade:''}\n${d.preco?'R$ '+Number(d.preco).toLocaleString('pt-BR'):'Preço pendente'} · ${d.photos.length} foto(s)`;}
 function newDraft(){return {fields:{cidade:'Marabá'},photos:[],status:'draft'};}
@@ -120,6 +138,14 @@ async function handler(req,res){try{
       res.setHeader('Set-Cookie',`moura_session=; HttpOnly; SameSite=Strict; Path=/api/admin; Max-Age=0${secureCookie?'; Secure':''}`);return send(res,200,{ok:true});
     }
     if(url.pathname==='/api/admin/properties'&&req.method==='GET')return send(res,200,{properties:state.properties});
+    if(url.pathname==='/api/admin/description'&&req.method==='POST'){
+      if(throttle('description:'+(req.socket.remoteAddress||'unknown'),8,60_000))return send(res,429,{error:'Aguarde um minuto antes de gerar outra descrição'});
+      const input=JSON.parse((await body(req,4096)).toString('utf8'));
+      if(!input||typeof input!=='object'||!input.fields||typeof input.fields!=='object')return send(res,400,{error:'Preencha os dados do imóvel'});
+      const f={};for(const key of fields)if(key!=='descricao')f[key]=safeText(input.fields[key],160);
+      if(!f.tipo&&!f.bairro&&!f.titulo)return send(res,400,{error:'Informe ao menos o tipo, título ou bairro do imóvel'});
+      return send(res,200,await generatedDescription(f));
+    }
     if(url.pathname==='/api/admin/properties'&&req.method==='POST'){
       if(throttle('upload:'+(req.socket.remoteAddress||'unknown'),30,60_000))return send(res,429,{error:'Muitas solicitações. Aguarde um minuto.'});
       const input=JSON.parse((await body(req,16*1024*1024)).toString('utf8'));
@@ -163,5 +189,5 @@ async function handler(req,res){try{
   else {const pathname=decodeURIComponent(url.pathname==='/'?'/index.html':url.pathname);filename=path.resolve(root,'.'+pathname);if(!filename.startsWith(root+path.sep)||filename.startsWith(dataDir+path.sep)||path.basename(filename).startsWith('.')||!['.html','.css','.js','.svg','.jpg','.jpeg','.png','.webp','.mov'].includes(path.extname(filename)))return send(res,404,{error:'Não encontrado'});}
   const file=await readFile(filename);res.writeHead(200,{'content-type':mime[path.extname(filename)]||'application/octet-stream','x-content-type-options':'nosniff'});res.end(file);
 }catch(error){console.error(error);send(res,error.code==='ENOENT'?404:400,{error:error.message||'Erro inesperado'});}}
-const server=http.createServer((req,res)=>{queue=queue.then(()=>handler(req,res)).catch(console.error);});
+const server=http.createServer((req,res)=>{if(req.url?.startsWith('/api/admin/description')){handler(req,res).catch(console.error);return;}queue=queue.then(()=>handler(req,res)).catch(console.error);});
 server.listen(port,()=>console.log(`Seu Moura: http://localhost:${port}`));
