@@ -70,3 +70,7 @@ Abra `/admin.html` no domínio do serviço Node. Cada anúncio pede título, fin
 O acesso exige apenas `ADMIN_USER` e `ADMIN_PASSWORD`; `SESSION_SECRET` é necessário para proteger as sessões. Configure os três como variáveis do servidor (nunca no repositório). Não é necessário aplicativo autenticador, e-mail ou SMS.
 
 O servidor limita tentativas de login e alterações, verifica a origem e um token contra falsificação de requisições, confere tamanho e assinatura das fotos e usa cookie HttpOnly/Secure/SameSite com validade de oito horas. Configure `NODE_ENV=production`, HTTPS e backup do volume.
+
+### Descrição automática
+
+O botão **Gerar descrição** usa os dados já preenchidos (tipo, finalidade, bairro, cidade, área, quartos, banheiros e preço). Com `OPENAI_API_KEY` configurada apenas no servidor, ele usa a API Responses da OpenAI com o modelo `OPENAI_DESCRIPTION_MODEL` (padrão `gpt-4.1-mini`). O resultado é limitado a 650 caracteres, deve ser revisado antes de publicar e não usa fotos. Sem chave ou se a API falhar, gera um texto automático com os dados conhecidos e avisa claramente que não usou IA. O servidor exige sessão e limita as gerações por minuto; nunca coloque a chave no navegador ou GitHub.
