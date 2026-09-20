@@ -239,3 +239,11 @@ em{font-family:inherit;font-style:normal;font-size:1em;font-weight:500}
   .featured-info h3{font-size:33px}
   .featured-actions .button{min-height:56px}
 }
+
+
+/* Large branded play control for the Caio Moura video */
+.founder-play{position:absolute;z-index:4;left:50%;top:50%;transform:translate(-50%,-50%);width:104px;height:104px;min-height:0;padding:0;border:2px solid #fff;border-radius:50%;display:grid;place-items:center;background:#ff971ee8;color:#191919;box-shadow:0 12px 36px #0008;transition:opacity .2s,transform .2s,background .2s}
+.founder-play span{display:block;width:0;height:0;margin-left:8px;border-top:18px solid transparent;border-bottom:18px solid transparent;border-left:29px solid #191919}
+.founder-play:hover,.founder-play:focus-visible{background:#ffad4f;transform:translate(-50%,-50%) scale(1.06)}
+.founder-play.is-hidden{opacity:0;pointer-events:none;transform:translate(-50%,-50%) scale(.86)}
+@media(max-width:720px){.founder-play{width:86px;height:86px}.founder-play span{border-top-width:15px;border-bottom-width:15px;border-left-width:25px}}
