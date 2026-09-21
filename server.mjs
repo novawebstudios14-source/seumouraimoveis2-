@@ -1,12 +1,15 @@
 import http from 'node:http';
-import {readFile,writeFile,mkdir,rename,stat,unlink} from 'node:fs/promises';
+import {readFile,writeFile,appendFile,mkdir,rename,stat,unlink,copyFile} from 'node:fs/promises';
 import {createHmac,timingSafeEqual,randomUUID,scryptSync,randomBytes,createHash,createCipheriv,createDecipheriv} from 'node:crypto';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import sharp from 'sharp';
 
 const root=path.dirname(fileURLToPath(import.meta.url));
 const dataDir=process.env.DATA_DIR||path.join(root,'data');
 const dataFile=path.join(dataDir,'catalog.json');
+const backupFile=path.join(dataDir,'catalog.backup.json');
+const auditFile=path.join(dataDir,'audit.jsonl');
 const mediaDir=path.join(dataDir,'media');
 const aiKeyFile=path.join(dataDir,'groq-key.enc');
 const port=Number(process.env.PORT||3000);
@@ -30,21 +33,24 @@ const secureCookie=process.env.NODE_ENV==='production';
 function equal(a,b){const x=Buffer.from(String(a)),y=Buffer.from(String(b));return x.length===y.length&&timingSafeEqual(x,y);}
 function originOK(req){const origin=req.headers.origin;const host=req.headers.host;return !!origin&&!!host&&new URL(origin).host===host&&(origin.startsWith('https://')||!secureCookie);}
 function session(req){const token=(req.headers.cookie||'').match(/(?:^|;\s*)moura_session=([a-f0-9]{64})/)?.[1];if(!token)return null;const entry=sessions.get(createHmac('sha256',sessionSecret).update(token).digest('hex'));if(!entry)return null;if(entry.expires<Date.now()){sessions.delete(createHmac('sha256',sessionSecret).update(token).digest('hex'));return null;}return entry;}
-function throttle(key,max,period){const now=Date.now(),entry=attempts.get(key);if(!entry||entry.until<now){attempts.set(key,{count:1,until:now+period});return false;}entry.count++;return entry.count>max;}
+function clientIp(req){const forwarded=process.env.TRUST_PROXY==='1'?String(req.headers['x-forwarded-for']||'').split(',')[0].trim():'';return forwarded||req.socket.remoteAddress||'unknown';}
+function throttle(key,max,period){const now=Date.now();if(attempts.size>5000)for(const [name,entry] of attempts)if(entry.until<now)attempts.delete(name);const entry=attempts.get(key);if(!entry||entry.until<now){attempts.set(key,{count:1,until:now+period});return false;}entry.count++;return entry.count>max;}
+function ipTag(req){return createHash('sha256').update(clientIp(req)).digest('hex').slice(0,16);}
+async function audit(req,action,result,details={}){const record={time:new Date().toISOString(),action,result,ip:ipTag(req),...details};await mkdir(dataDir,{recursive:true});await appendFile(auditFile,JSON.stringify(record)+'\n',{mode:0o600}).catch(error=>console.error('Falha no log de auditoria:',error.message));}
 function adminGuard(req,res){if(!adminPassword||!sessionSecret){send(res,503,{error:'Cadastro ainda não configurado'});return null;}const current=session(req);if(!current){send(res,401,{error:'Entre na sua conta novamente'});return null;}if(req.method!=='GET'&&(!originOK(req)||!equal(req.headers['x-csrf-token']||'',current.csrf))){send(res,403,{error:'Solicitação não autorizada'});return null;}return current;}
 let state={properties:[],drafts:{},seen:[]};
-let queue=Promise.resolve();
+let saveQueue=Promise.resolve();
 let groqKey='';
 let groqModel=process.env.GROQ_DESCRIPTION_MODEL||'llama-3.3-70b-versatile';
 
-async function save(){await mkdir(dataDir,{recursive:true});const tmp=dataFile+'.'+randomUUID();await writeFile(tmp,JSON.stringify(state,null,2));await rename(tmp,dataFile);}
+async function save(){const snapshot=JSON.stringify(state,null,2);const operation=async()=>{await mkdir(dataDir,{recursive:true});await copyFile(dataFile,backupFile).catch(error=>{if(error.code!=='ENOENT')throw error;});const tmp=dataFile+'.'+randomUUID();await writeFile(tmp,snapshot,{mode:0o600});await rename(tmp,dataFile);};const result=saveQueue.then(operation,operation);saveQueue=result.catch(()=>{});return result;}
 try{state={...state,...JSON.parse(await readFile(dataFile,'utf8'))};}catch(error){if(error.code!=='ENOENT')throw error;}
 // Repair the example listing entered as "450.000" in the old numeric input,
 // which browsers submitted as 450 while its description retained R$ 450.000.
 for(const property of state.properties){const f=property.fields||{};if(f.preco===450&&f.bairro==='Cidade Nova'&&f.cidade==='Marabá'&&/R\$\s*450\.000\b/.test(f.descricao||'')){f.preco=450000;await save();console.log('Preço do imóvel de exemplo corrigido para R$ 450.000');}}
 if(process.env.SESSION_SECRET){try{const sealed=Buffer.from(await readFile(aiKeyFile,'utf8'),'base64');const decipher=createDecipheriv('aes-256-gcm',createHash('sha256').update(process.env.SESSION_SECRET).digest(),sealed.subarray(0,12));decipher.setAuthTag(sealed.subarray(12,28));groqKey=Buffer.concat([decipher.update(sealed.subarray(28)),decipher.final()]).toString('utf8');}catch(error){if(error.code!=='ENOENT')console.error('Chave Groq armazenada não pôde ser carregada');}}
 async function saveGroqKey(key){const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',createHash('sha256').update(sessionSecret).digest(),iv);const encrypted=Buffer.concat([cipher.update(key,'utf8'),cipher.final()]);await mkdir(dataDir,{recursive:true});const tmp=aiKeyFile+'.'+randomUUID();await writeFile(tmp,Buffer.concat([iv,cipher.getAuthTag(),encrypted]).toString('base64'),{mode:0o600,flag:'wx'});await rename(tmp,aiKeyFile);groqKey=key;}
-async function checkGroq(){const key=process.env.GROQ_API_KEY||groqKey;if(!key)return;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);try{const response=await fetch('https://api.groq.com/openai/v1/models',{headers:{Authorization:`Bearer ${key}`},signal:controller.signal});if(!response.ok){console.error('Groq: chave ou serviço indisponível, HTTP',response.status);return;}const data=await response.json();const ids=new Set((data.data||[]).map(x=>x.id));if(!ids.has(groqModel)&&!process.env.GROQ_DESCRIPTION_MODEL){groqModel=['llama-3.1-8b-instant','openai/gpt-oss-20b'].find(id=>ids.has(id))||groqModel;}if(!ids.has(groqModel)){console.error('Groq: modelo configurado indisponível');return;}console.log(`Groq: modelo ${groqModel} disponível`);const sample=await generatedDescription({tipo:'Casa',finalidade:'venda',bairro:'Centro',cidade:'Marabá',quartos:'2'});console.log(sample.source==='ai'?'Groq: geração de exemplo confirmada':'Groq: geração de exemplo indisponível');}catch(error){console.error('Groq: não foi possível verificar conexão',error.name);}finally{clearTimeout(timer);}}
+async function checkGroq(){const key=process.env.GROQ_API_KEY||groqKey;if(!key)return;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);try{const response=await fetch('https://api.groq.com/openai/v1/models',{headers:{Authorization:`Bearer ${key}`},signal:controller.signal});if(!response.ok){console.error('Groq: chave ou serviço indisponível, HTTP',response.status);return;}const data=await response.json();const ids=new Set((data.data||[]).map(x=>x.id));if(!ids.has(groqModel)&&!process.env.GROQ_DESCRIPTION_MODEL){groqModel=['llama-3.1-8b-instant','openai/gpt-oss-20b'].find(id=>ids.has(id))||groqModel;}if(!ids.has(groqModel)){console.error('Groq: modelo configurado indisponível');return;}console.log(`Groq: modelo ${groqModel} disponível`);}catch(error){console.error('Groq: não foi possível verificar conexão',error.name);}finally{clearTimeout(timer);}}
 
 function normalizePrice(value){const text=String(value).trim().replace(/\s|R\$/gi,'');if(!/^\d[\d.,]*$/.test(text))return null;const clean=text.includes(',')?text.replace(/\./g,'').replace(',','.'):text.replace(/\./g,'');const number=Number(clean);return Number.isFinite(number)&&number>0&&number<=1e10?number:null;}
 function safeText(value,max=500){return String(value??'').trim().slice(0,max);}
@@ -131,10 +137,11 @@ function execute(sender,text,photo){
   return `${changed?'Rascunho atualizado.':'Não identifiquei dados.'}${invalid.length?' Confira: '+invalid.join(', ')+'.':''}\n${summary({...d.fields,photos:d.photos})}\n${missing(d.fields).length?'Faltam: '+missing(d.fields).map(k=>labels[k]).join(', ')+'.':''} Envie fotos e digite PUBLICAR quando terminar.`;
 }
 
-function send(res,status,body,type='application/json; charset=utf-8'){res.writeHead(status,{'content-type':type,'cache-control':'no-store','x-content-type-options':'nosniff'});res.end(type.startsWith('application/json')?JSON.stringify(body):body);}
+function baseHeaders(){return {'x-content-type-options':'nosniff','referrer-policy':'strict-origin-when-cross-origin','permissions-policy':'camera=(), microphone=(), geolocation=()','x-frame-options':'DENY',...(secureCookie?{'strict-transport-security':'max-age=31536000; includeSubDomains'}:{})};}
+function send(res,status,body,type='application/json; charset=utf-8'){res.writeHead(status,{'content-type':type,'cache-control':'no-store',...baseHeaders()});res.end(type.startsWith('application/json')?JSON.stringify(body):body);}
 async function body(req,max=1024*1024){let chunks=[],size=0;for await(const chunk of req){size+=chunk.length;if(size>max)throw Error('Corpo grande demais');chunks.push(chunk);}return Buffer.concat(chunks);}
-async function storePhoto(bytes,extension){if(bytes.length>10*1024*1024)throw Error('Foto grande demais (máximo 10 MB)');const signatures={jpg:['ffd8ff'],png:['89504e47'],webp:['52494646']};if(!signatures[extension]?.some(s=>bytes.toString('hex',0,s.length/2)===s))throw Error('Formato de imagem inválido');await mkdir(mediaDir,{recursive:true});const name=randomUUID()+'.'+extension;await writeFile(path.join(mediaDir,name),bytes,{flag:'wx'});return '/media/'+name;}
-async function metaPhoto(mediaId){if(!accessToken)throw Error('WHATSAPP_ACCESS_TOKEN não configurado');const headers={Authorization:`Bearer ${accessToken}`};const info=await fetch(`https://graph.facebook.com/${apiVersion}/${encodeURIComponent(mediaId)}`,{headers});if(!info.ok)throw Error('Falha ao consultar mídia');const meta=await info.json();const extension={'image/jpeg':'jpg','image/png':'png','image/webp':'webp'}[meta.mime_type];if(!extension)throw Error('Formato de imagem não suportado');const download=await fetch(meta.url,{headers});if(!download.ok)throw Error('Falha ao baixar foto');return storePhoto(Buffer.from(await download.arrayBuffer()),extension);}
+async function storePhoto(bytes){if(bytes.length>10*1024*1024)throw Error('Foto grande demais (máximo 10 MB)');let image;try{image=sharp(bytes,{limitInputPixels:40_000_000,failOn:'warning'});const metadata=await image.metadata();if(!['jpeg','png','webp'].includes(metadata.format)||!metadata.width||!metadata.height)throw Error('Formato de imagem inválido');}catch{throw Error('Imagem inválida ou corrompida');}const safe=await image.rotate().resize({width:2400,height:2400,fit:'inside',withoutEnlargement:true}).jpeg({quality:82,mozjpeg:true}).toBuffer();await mkdir(mediaDir,{recursive:true});const name=randomUUID()+'.jpg';await writeFile(path.join(mediaDir,name),safe,{flag:'wx',mode:0o600});return '/media/'+name;}
+async function metaPhoto(mediaId){if(!accessToken)throw Error('WHATSAPP_ACCESS_TOKEN não configurado');const headers={Authorization:`Bearer ${accessToken}`};const info=await fetch(`https://graph.facebook.com/${apiVersion}/${encodeURIComponent(mediaId)}`,{headers});if(!info.ok)throw Error('Falha ao consultar mídia');const meta=await info.json();if(!['image/jpeg','image/png','image/webp'].includes(meta.mime_type))throw Error('Formato de imagem não suportado');const download=await fetch(meta.url,{headers});if(!download.ok)throw Error('Falha ao baixar foto');return storePhoto(Buffer.from(await download.arrayBuffer()));}
 async function reply(phone,message){if(!accessToken||!phoneId)return;const response=await fetch(`https://graph.facebook.com/${apiVersion}/${phoneId}/messages`,{method:'POST',headers:{Authorization:`Bearer ${accessToken}`,'Content-Type':'application/json'},body:JSON.stringify({messaging_product:'whatsapp',to:phone,type:'text',text:{body:message}})});if(!response.ok)console.error('Falha ao responder WhatsApp:',response.status);}
 async function processMessage(sender,text,photo,id){if(!allowed.has(sender))return null;if(id&&state.seen.includes(id))return null;const message=execute(sender,text,photo);if(id)state.seen=[...state.seen.slice(-999),id];await save();return message;}
 async function webhook(req,res){if(!appSecret)return send(res,503,{error:'Configure META_APP_SECRET'});const raw=await body(req);const sent=req.headers['x-hub-signature-256']||'';const expected='sha256='+createHmac('sha256',appSecret).update(raw).digest('hex');if(sent.length!==expected.length||!timingSafeEqual(Buffer.from(sent),Buffer.from(expected)))return send(res,401,{error:'Assinatura inválida'});
@@ -144,22 +151,24 @@ async function webhook(req,res){if(!appSecret)return send(res,503,{error:'Config
 }
 async function handler(req,res){try{
   const url=new URL(req.url,'http://localhost');
+  if(url.pathname==='/health'&&req.method==='GET')return send(res,200,{ok:true,service:'seu-moura'});
   if(url.pathname.startsWith('/api/admin/')){
     res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Frame-Options','DENY');
     if(url.pathname==='/api/admin/login'&&req.method==='POST'){
       if(!adminPassword||!sessionSecret)return send(res,503,{error:'Acesso ainda não configurado'});
-      const ip=req.socket.remoteAddress||'unknown';
-      if(throttle('login:'+ip,8,15*60_000))return send(res,429,{error:'Muitas tentativas. Aguarde 15 minutos.'});
       if(!originOK(req))return send(res,403,{error:'Origem inválida'});
       const input=JSON.parse((await body(req,2048)).toString('utf8'));
       const submittedUser=String(input.username||'').trim();
       const submittedPassword=String(input.password||'').trim().slice(0,256);
+      const loginKey='login:'+clientIp(req)+':'+createHash('sha256').update(submittedUser).digest('hex').slice(0,16);
+      if(throttle(loginKey,8,15*60_000)){await audit(req,'login','blocked',{user:submittedUser.slice(0,64)});return send(res,429,{error:'Muitas tentativas. Aguarde 15 minutos.'});}
       const incoming=scryptSync(submittedPassword,passwordSalt,64);
-      if(!equal(submittedUser,adminUser.trim())||!timingSafeEqual(incoming,passwordHash))return send(res,401,{error:'Dados de acesso inválidos'});
-      attempts.delete('login:'+ip);
+      if(!equal(submittedUser,adminUser.trim())||!timingSafeEqual(incoming,passwordHash)){await audit(req,'login','failed',{user:submittedUser.slice(0,64)});return send(res,401,{error:'Dados de acesso inválidos'});}
+      attempts.delete(loginKey);
       const token=randomBytes(32).toString('hex'),csrf=randomBytes(32).toString('hex');
       sessions.set(createHmac('sha256',sessionSecret).update(token).digest('hex'),{csrf,expires:Date.now()+8*60*60_000});
       res.setHeader('Set-Cookie',`moura_session=${token}; HttpOnly; SameSite=Strict; Path=/api/admin; Max-Age=28800${secureCookie?'; Secure':''}`);
+      await audit(req,'login','success',{user:submittedUser.slice(0,64)});
       return send(res,200,{csrf});
     }
     const current=adminGuard(req,res);if(!current)return;
@@ -167,7 +176,12 @@ async function handler(req,res){try{
     if(url.pathname==='/api/admin/session'&&req.method==='GET')return send(res,200,{csrf:current.csrf});
     if(url.pathname==='/api/admin/logout'&&req.method==='POST'){
       const token=(req.headers.cookie||'').match(/moura_session=([a-f0-9]{64})/)?.[1];if(token)sessions.delete(createHmac('sha256',sessionSecret).update(token).digest('hex'));
+      await audit(req,'logout','success');
       res.setHeader('Set-Cookie',`moura_session=; HttpOnly; SameSite=Strict; Path=/api/admin; Max-Age=0${secureCookie?'; Secure':''}`);return send(res,200,{ok:true});
+    }
+    if(url.pathname.startsWith('/api/admin/media/')&&req.method==='GET'){
+      const name=path.basename(url.pathname);if(!/^[a-f0-9-]{36}\.(?:jpg|jpeg|png|webp)$/.test(name))return send(res,404,{error:'Não encontrado'});
+      const file=await readFile(path.join(mediaDir,name));res.writeHead(200,{'content-type':mime[path.extname(name)]||'application/octet-stream','cache-control':'private, no-store',...baseHeaders()});return res.end(file);
     }
     if(url.pathname==='/api/admin/properties'&&req.method==='GET')return send(res,200,{properties:state.properties});
     if(url.pathname==='/api/admin/ai-config'&&req.method==='GET')return send(res,200,{configured:!!(process.env.GROQ_API_KEY||groqKey)});
@@ -179,7 +193,7 @@ async function handler(req,res){try{
       const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);
       let valid=false;try{const check=await fetch('https://api.groq.com/openai/v1/models',{headers:{Authorization:`Bearer ${key}`},signal:controller.signal});valid=check.ok;}catch{}finally{clearTimeout(timer);}
       if(!valid)return send(res,400,{error:'Não foi possível validar a chave na Groq. Confira a chave e tente novamente.'});
-      await saveGroqKey(key);return send(res,200,{configured:true});
+      await saveGroqKey(key);await audit(req,'groq-key','updated');return send(res,200,{configured:true});
     }
     if(url.pathname==='/api/admin/description'&&req.method==='POST'){
       if(throttle('description:'+(req.socket.remoteAddress||'unknown'),8,60_000))return send(res,429,{error:'Aguarde um minuto antes de gerar outra descrição'});
@@ -210,23 +224,23 @@ async function handler(req,res){try{
       const kept=(existing?.photos||[]).filter(src=>!removed.includes(src));
       if(kept.length+photos.length<1||kept.length+photos.length>20)return send(res,400,{error:'Envie de 1 a 20 fotos'});
       const saved=[];
-      for(const item of photos){if(typeof item!=='string'||item.length>14*1024*1024)return send(res,400,{error:'Foto inválida'});const match=item.match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/);if(!match)throw Error('Envie JPG, PNG ou WebP');saved.push(await storePhoto(Buffer.from(match[2],'base64'),{jpeg:'jpg',png:'png',webp:'webp'}[match[1]]));}
+      for(const photo of photos){if(typeof photo!=='string'||photo.length>14*1024*1024)return send(res,400,{error:'Foto inválida'});const match=photo.match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/);if(!match)throw Error('Envie JPG, PNG ou WebP');saved.push(await storePhoto(Buffer.from(match[2],'base64')));}
       const item={id:existing?.id||randomUUID(),owner:existing?.owner||'admin',fields:f,photos:[...kept,...saved],status:existing?.status||'published',updatedAt:new Date().toISOString()};
       if(existing)Object.assign(existing,item);else state.properties.push(item);
-      await save();for(const src of removed){if(!kept.includes(src)&&src.startsWith('/media/'))await unlink(path.join(mediaDir,path.basename(src))).catch(()=>{});}return send(res,200,{item});
+      await save();for(const src of removed){if(!kept.includes(src)&&src.startsWith('/media/'))await unlink(path.join(mediaDir,path.basename(src))).catch(()=>{});}await audit(req,'property-save','success',{propertyId:item.id,editing:!!existing,photos:item.photos.length});return send(res,200,{item});
     }
     if(url.pathname==='/api/admin/status'&&req.method==='POST'){
       const input=JSON.parse((await body(req,1024)).toString('utf8'));
       if(!['published','pausar','vendido','alugado'].includes(input.status))return send(res,400,{error:'Status inválido'});
       const item=state.properties.find(p=>p.id===input.id);if(!item)return send(res,404,{error:'Imóvel não encontrado'});
-      item.status=input.status;item.updatedAt=new Date().toISOString();await save();return send(res,200,{ok:true});
+      item.status=input.status;item.updatedAt=new Date().toISOString();await save();await audit(req,'property-status','success',{propertyId:item.id,status:item.status});return send(res,200,{ok:true});
     }
     return send(res,404,{error:'Não encontrado'});
   }
   if(url.pathname==='/webhooks/whatsapp'&&req.method==='GET'){if(!process.env.META_VERIFY_TOKEN)return send(res,503,{error:'Token de verificação ausente'});return url.searchParams.get('hub.mode')==='subscribe'&&url.searchParams.get('hub.verify_token')===process.env.META_VERIFY_TOKEN?send(res,200,url.searchParams.get('hub.challenge')||'','text/plain'):send(res,403,{error:'Verificação inválida'});}
   if(url.pathname==='/webhooks/whatsapp'&&req.method==='POST')return await webhook(req,res);
   if(url.pathname==='/api/properties'&&req.method==='GET')return send(res,200,{properties:state.properties.filter(p=>p.status==='published').map(({id,fields,photos,updatedAt})=>({id,...fields,photos,updatedAt}))});
-  if(url.pathname==='/api/demo'&&req.method==='POST'){if(!preview||!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress))return send(res,404,{error:'Indisponível'});const input=JSON.parse((await body(req,14*1024*1024)).toString('utf8'));const sender='5594000000000';allowed.add(sender);let photo=null;if(input.photo){const match=String(input.photo).match(/^data:image\/(jpeg|png|webp);base64,(.+)$/s);if(!match)throw Error('Imagem inválida');photo=await storePhoto(Buffer.from(match[2],'base64'),{jpeg:'jpg',png:'png',webp:'webp'}[match[1]]);}const response=await processMessage(sender,input.text||'',photo,randomUUID());return send(res,200,{reply:response,draft:state.drafts[sender]||null});}
+  if(url.pathname==='/api/demo'&&req.method==='POST'){if(!preview||!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress))return send(res,404,{error:'Indisponível'});const input=JSON.parse((await body(req,14*1024*1024)).toString('utf8'));const sender='5594000000000';allowed.add(sender);let photo=null;if(input.photo){const match=String(input.photo).match(/^data:image\/(jpeg|png|webp);base64,(.+)$/s);if(!match)throw Error('Imagem inválida');photo=await storePhoto(Buffer.from(match[2],'base64'));}const response=await processMessage(sender,input.text||'',photo,randomUUID());return send(res,200,{reply:response,draft:state.drafts[sender]||null});}
   if(req.method!=='GET')return send(res,405,{error:'Método não permitido'});
   if(url.pathname==='/simulador.html'&&(!preview||!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress)))return send(res,404,{error:'Indisponível'});
   if(url.pathname==='/admin.html'||url.pathname==='/admin.js'){
@@ -234,9 +248,14 @@ async function handler(req,res){try{
     res.setHeader('Content-Security-Policy',"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
   }
   let filename;
-  if(url.pathname.startsWith('/media/'))filename=path.join(mediaDir,path.basename(url.pathname));
+  if(url.pathname.startsWith('/media/')){const publicPath='/media/'+path.basename(url.pathname);if(!state.properties.some(property=>property.status==='published'&&(property.photos||[]).includes(publicPath)))return send(res,404,{error:'Não encontrado'});filename=path.join(mediaDir,path.basename(url.pathname));}
   else {const pathname=decodeURIComponent(url.pathname==='/'?'/index.html':url.pathname);filename=path.resolve(root,'.'+pathname);if(!filename.startsWith(root+path.sep)||filename.startsWith(dataDir+path.sep)||path.basename(filename).startsWith('.')||!['.html','.css','.js','.svg','.jpg','.jpeg','.png','.webp','.mov'].includes(path.extname(filename)))return send(res,404,{error:'Não encontrado'});}
-  const file=await readFile(filename),extension=path.extname(filename);const headers={'content-type':mime[extension]||'application/octet-stream','x-content-type-options':'nosniff'};if(['.html','.js','.css'].includes(extension))headers['cache-control']='no-store';else headers['cache-control']='public, max-age=3600';res.writeHead(200,headers);res.end(file);
-}catch(error){console.error(error);send(res,error.code==='ENOENT'?404:400,{error:error.message||'Erro inesperado'});}}
-const server=http.createServer((req,res)=>{if(req.url?.startsWith('/api/admin/description')){handler(req,res).catch(console.error);return;}queue=queue.then(()=>handler(req,res)).catch(console.error);});
+  const file=await readFile(filename),extension=path.extname(filename);const headers={'content-type':mime[extension]||'application/octet-stream',...baseHeaders()};if(extension==='.html'&&url.pathname!=='/admin.html')headers['content-security-policy']="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; media-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests";if(['.html','.js','.css'].includes(extension))headers['cache-control']='no-store';else headers['cache-control']='public, max-age=3600';res.writeHead(200,headers);res.end(file);
+}catch(error){console.error(error);send(res,error.code==='ENOENT'?404:400,{error:error.code==='ENOENT'?'Não encontrado':'Não foi possível processar a solicitação'});}}
+const server=http.createServer((req,res)=>{handler(req,res).catch(error=>{console.error(error);if(!res.headersSent)send(res,500,{error:'Erro interno'});else res.destroy();});});
+server.headersTimeout=15_000;
+server.requestTimeout=30_000;
+server.keepAliveTimeout=5_000;
+server.maxRequestsPerSocket=100;
+server.setTimeout(30_000,socket=>socket.destroy());
 server.listen(port,()=>{console.log(`Seu Moura: http://localhost:${port}`);checkGroq().catch(console.error);});

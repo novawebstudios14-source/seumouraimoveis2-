@@ -12,11 +12,11 @@ before(async()=>{server=spawn(process.execPath,['server.mjs'],{env:{...process.e
 after(async()=>{server?.kill();await rm(dir,{recursive:true,force:true});});
 const say=async(text,photo)=>{const r=await fetch(base+'/api/demo',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text,photo})});assert.equal(r.status,200);return r.json();};
 const list=async()=> (await (await fetch(base+'/api/properties')).json()).properties;
-const tinyPng='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/V7sAAAAASUVORK5CYII=';
+const tinyPng='data:image/webp;base64,'+(await readFile(new URL('../assets/house.webp',import.meta.url))).toString('base64');
 test('rascunho, validação, publicação, edição e pausa',async()=>{
  assert.match((await say('NOVO')).reply,/Novo rascunho/);
  assert.match((await say('PUBLICAR')).reply,/Faltam/);
- assert.match((await say('Título: Casa Teste\nFinalidade: venda\nTipo: casa\nBairro: Centro\nPreço: 430000\nQuartos: 3')).reply,/430.000/);
+ assert.match((await say('Título: Casa Teste\nFinalidade: venda\nTipo: casa\nBairro: Centro\nPreço: 430000\nQuartos: 3\nBanheiros: 2\nÁrea: 120\nDescrição: Casa de teste com dados confirmados.')).reply,/430.000/);
  assert.match((await say('PUBLICAR')).reply,/foto/);
  await say('',tinyPng);assert.match((await say('PUBLICAR')).reply,/CONFIRMAR/);
  assert.equal((await list()).length,0);

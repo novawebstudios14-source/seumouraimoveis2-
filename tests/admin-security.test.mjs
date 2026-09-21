@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {mkdtemp,rm} from 'node:fs/promises';
+import {mkdtemp,rm,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 
@@ -23,8 +23,8 @@ test('login com senha limita tentativas, protege publicações e encerra sessão
     const unauthorizedDescription=await request('description',{fields:{tipo:'Casa',bairro:'Centro'}});assert.equal(unauthorizedDescription.status,401);
     const descriptionResponse=await request('description',{fields:{tipo:'Casa',bairro:'Centro',cidade:'Marabá',finalidade:'venda',quartos:'3',preco:'120000'}},cookie,csrf);
     assert.equal(descriptionResponse.status,200);const draft=await descriptionResponse.json();assert.equal(draft.source,'automatic');assert.match(draft.description,/Casa à venda no bairro Centro, em Marabá/);assert.match(draft.description,/3 quartos/);
-    const photo='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/V7sAAAAASUVORK5CYII=';
-    const published=await request('properties',{fields:{titulo:'Casa',finalidade:'venda',tipo:'Casa',bairro:'Centro',preco:'120000',descricao:draft.description},photos:[photo]},cookie,csrf);
+    const photo='data:image/webp;base64,'+(await readFile(new URL('../assets/house.webp',import.meta.url))).toString('base64');
+    const published=await request('properties',{fields:{titulo:'Casa',finalidade:'venda',tipo:'Casa',bairro:'Centro',cidade:'Marabá',preco:'120000',quartos:'3',banheiros:'2',area:'120',descricao:draft.description},photos:[photo]},cookie,csrf);
     assert.equal(published.status,200,await published.text());
     assert.equal((await (await fetch(base+'/api/properties')).json()).properties.length,1);
     const logout=await request('logout',{},cookie,csrf);assert.equal(logout.status,200);

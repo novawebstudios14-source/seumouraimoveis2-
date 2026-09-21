@@ -1,1 +1,1 @@
-{"name":"seu-moura-whatsapp-catalog","private":true,"type":"module","scripts":{"start":"node server.mjs","test":"node --test tests/*.test.mjs"},"engines":{"node":">=20"}}
+{"name":"seu-moura-whatsapp-catalog","private":true,"type":"module","scripts":{"start":"node server.mjs","test":"node --test tests/*.test.mjs"},"dependencies":{"sharp":"0.35.4"},"engines":{"node":">=20"}}
