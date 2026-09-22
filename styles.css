@@ -298,3 +298,64 @@ body.menu-open{overflow:hidden}
   .header .nav-cta span{margin-left:auto}
 }
 @keyframes menu-enter{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}
+
+
+/* Mobile catalog space optimization — content and functionality preserved */
+@media(max-width:720px){
+  .catalog-page main{padding-top:72px}
+  .catalog-hero{
+    padding:38px 5% 34px;
+    gap:16px;
+  }
+  .catalog-hero .eyebrow{margin-bottom:10px}
+  .catalog-hero h1{
+    font-size:clamp(36px,10.4vw,43px);
+    line-height:1.02;
+  }
+  .catalog-hero>p{
+    max-width:38ch;
+    font-size:14px;
+    line-height:1.55;
+  }
+  .catalog-shell{padding:16px 5% 76px}
+  .filter-heading{padding:13px 14px}
+  .filter-heading p{font-size:14px}
+  .filter-heading span{font-size:11px}
+  .catalog-filters label{
+    min-width:0;
+    padding:11px 12px;
+    gap:1px;
+  }
+  .catalog-filters select{
+    min-width:0;
+    min-height:32px;
+    padding-top:2px;
+    padding-bottom:2px;
+    font-size:14px;
+  }
+  .catalog-filters .button{
+    min-height:48px;
+    padding:12px 14px;
+  }
+  .catalog-result{padding:16px 0 12px}
+  .catalog-grid{gap:16px;margin-top:16px}
+  .catalog-media{aspect-ratio:16/10}
+  .catalog-badge{top:12px;left:12px}
+  .catalog-card-body{padding:19px 16px 17px}
+  .catalog-card h2{font-size:29px}
+  .catalog-card .listing-location{margin-top:6px}
+  .catalog-specs{
+    gap:8px;
+    margin:15px 0 14px;
+    padding:13px 0;
+  }
+  .catalog-specs dd{font-size:17px}
+  .catalog-price strong{font-size:25px;line-height:1.2}
+  .catalog-card .button{margin-top:16px;min-height:50px;padding:12px 16px}
+  .catalog-note{margin-top:16px}
+}
+@media(max-width:390px){
+  .catalog-hero{padding-inline:5%}
+  .catalog-shell{padding-inline:5%}
+  .catalog-filters label{padding:10px 13px}
+}
