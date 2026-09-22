@@ -15,6 +15,7 @@ if(header){
 function closeMenu(){
   if(!nav||!menu)return;
   nav.classList.remove('open');
+  document.body.classList.remove('menu-open');
   menu.setAttribute('aria-expanded','false');
   menu.setAttribute('aria-label','Abrir menu');
 }
@@ -22,6 +23,7 @@ function closeMenu(){
 if(menu&&nav){
   menu.addEventListener('click',()=>{
     const open=nav.classList.toggle('open');
+    document.body.classList.toggle('menu-open',open);
     menu.setAttribute('aria-expanded',String(open));
     menu.setAttribute('aria-label',open?'Fechar menu':'Abrir menu');
   });
@@ -100,67 +102,34 @@ if(dialog){
 const founderVideo=document.querySelector('.founder-video video');
 const founderPlayer=document.querySelector('.founder-video');
 const founderPlay=document.querySelector('.founder-play');
-const videoToggle=document.querySelector('.video-toggle');
-const videoTime=document.querySelector('.video-time');
-const videoProgress=document.querySelector('.video-progress');
-const videoMute=document.querySelector('.video-mute');
-const videoVolume=document.querySelector('.video-volume');
-const videoFullscreen=document.querySelector('.video-fullscreen');
+const founderStatus=document.querySelector('.founder-video-status');
 if(founderVideo&&founderPlay&&founderPlayer){
-  const formatTime=value=>{
-    const seconds=Number.isFinite(value)?Math.max(0,Math.floor(value)):0;
-    return Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0');
-  };
-  const toggleVideo=()=>{
-    if(founderVideo.paused||founderVideo.ended)founderVideo.play();
-    else founderVideo.pause();
-  };
   const updateFounderPlayer=()=>{
     const playing=!founderVideo.paused&&!founderVideo.ended;
     founderPlay.classList.toggle('is-hidden',playing);
     founderPlay.setAttribute('aria-label',playing?'Pausar vídeo':'Reproduzir vídeo');
-    if(videoToggle){
-      videoToggle.textContent=playing?'❚❚':'▶';
-      videoToggle.setAttribute('aria-label',playing?'Pausar':'Reproduzir');
-    }
-    if(videoTime)videoTime.textContent=formatTime(founderVideo.currentTime)+' / '+formatTime(founderVideo.duration);
-    if(videoProgress){
-      const progress=founderVideo.duration?(founderVideo.currentTime/founderVideo.duration)*100:0;
-      videoProgress.value=String(progress);
-      videoProgress.style.setProperty('--video-progress',progress+'%');
-    }
-    if(videoMute){
-      videoMute.textContent=founderVideo.muted||founderVideo.volume===0?'🔇':'🔊';
-      videoMute.setAttribute('aria-label',founderVideo.muted?'Ativar som':'Silenciar');
-    }
+  };
+  const toggleVideo=()=>{
+    if(founderVideo.paused||founderVideo.ended){
+      founderVideo.play().catch(()=>{
+        if(founderStatus)founderStatus.hidden=false;
+      });
+    }else founderVideo.pause();
   };
   founderPlay.addEventListener('click',toggleVideo);
-  videoToggle?.addEventListener('click',toggleVideo);
-  founderVideo.addEventListener('click',toggleVideo);
   founderVideo.addEventListener('play',updateFounderPlayer);
   founderVideo.addEventListener('pause',updateFounderPlayer);
   founderVideo.addEventListener('ended',updateFounderPlayer);
-  founderVideo.addEventListener('timeupdate',updateFounderPlayer);
-  founderVideo.addEventListener('loadedmetadata',updateFounderPlayer);
-  founderVideo.addEventListener('volumechange',updateFounderPlayer);
-  videoProgress?.addEventListener('input',()=>{
-    if(founderVideo.duration)founderVideo.currentTime=(Number(videoProgress.value)/100)*founderVideo.duration;
+  founderVideo.addEventListener('loadedmetadata',()=>{
+    if(founderStatus)founderStatus.hidden=true;
+    updateFounderPlayer();
   });
-  videoMute?.addEventListener('click',()=>{founderVideo.muted=!founderVideo.muted;});
-  videoVolume?.addEventListener('input',()=>{
-    founderVideo.volume=Number(videoVolume.value);
-    founderVideo.muted=founderVideo.volume===0;
-  });
-  videoFullscreen?.addEventListener('click',()=>{
-    if(document.fullscreenElement)document.exitFullscreen?.();
-    else founderPlayer.requestFullscreen?.();
-  });
-  document.addEventListener('fullscreenchange',()=>{
-    videoFullscreen?.setAttribute('aria-label',document.fullscreenElement?'Sair da tela cheia':'Tela cheia');
+  founderVideo.addEventListener('error',()=>{
+    if(founderStatus)founderStatus.hidden=false;
+    founderPlay.classList.add('is-hidden');
   });
   updateFounderPlayer();
 }
-
 
 // Complete the logo reveal before opening the first screen, including cached visits.
 (() => {

@@ -250,7 +250,23 @@ async function handler(req,res){try{
   let filename;
   if(url.pathname.startsWith('/media/')){const publicPath='/media/'+path.basename(url.pathname);if(!state.properties.some(property=>property.status==='published'&&(property.photos||[]).includes(publicPath)))return send(res,404,{error:'Não encontrado'});filename=path.join(mediaDir,path.basename(url.pathname));}
   else {const pathname=decodeURIComponent(url.pathname==='/'?'/index.html':url.pathname);filename=path.resolve(root,'.'+pathname);if(!filename.startsWith(root+path.sep)||filename.startsWith(dataDir+path.sep)||path.basename(filename).startsWith('.')||!['.html','.css','.js','.svg','.jpg','.jpeg','.png','.webp','.mov'].includes(path.extname(filename)))return send(res,404,{error:'Não encontrado'});}
-  const file=await readFile(filename),extension=path.extname(filename);const headers={'content-type':mime[extension]||'application/octet-stream',...baseHeaders()};if(extension==='.html'&&url.pathname!=='/admin.html')headers['content-security-policy']="default-src 'self'; script-src 'self' 'sha256-Lw9V+yTCkJJ28lw8CDUjLPV7Ukz/j4VG8MQfAEeOwx4='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; media-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests";if(['.html','.js','.css'].includes(extension))headers['cache-control']='no-store';else headers['cache-control']='public, max-age=3600';res.writeHead(200,headers);res.end(file);
+  const extension=path.extname(filename);const headers={'content-type':mime[extension]||'application/octet-stream',...baseHeaders()};if(extension==='.html'&&url.pathname!=='/admin.html')headers['content-security-policy']="default-src 'self'; script-src 'self' 'sha256-Lw9V+yTCkJJ28lw8CDUjLPV7Ukz/j4VG8MQfAEeOwx4='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; media-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests";if(['.html','.js','.css'].includes(extension))headers['cache-control']='no-store';else headers['cache-control']='public, max-age=3600';
+  if(extension==='.mov'){
+    const info=await stat(filename);headers['accept-ranges']='bytes';
+    const requested=req.headers.range;
+    if(requested){
+      const match=/^bytes=(\d*)-(\d*)$/.exec(requested);
+      if(!match){res.writeHead(416,{...baseHeaders(),'content-range':`bytes */${info.size}`});return res.end();}
+      let start=match[1]?Number(match[1]):0;let end=match[2]?Number(match[2]):info.size-1;
+      if(!match[1]&&match[2]){const suffix=Number(match[2]);start=Math.max(0,info.size-suffix);end=info.size-1;}
+      if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||end<start||start>=info.size){res.writeHead(416,{...baseHeaders(),'content-range':`bytes */${info.size}`});return res.end();}
+      end=Math.min(end,info.size-1);const file=await readFile(filename);
+      res.writeHead(206,{...headers,'content-range':`bytes ${start}-${end}/${info.size}`,'content-length':String(end-start+1)});
+      return req.method==='HEAD'?res.end():res.end(file.subarray(start,end+1));
+    }
+    headers['content-length']=String(info.size);
+  }
+  const file=await readFile(filename);res.writeHead(200,headers);if(req.method==='HEAD')return res.end();res.end(file);
 }catch(error){console.error(error);send(res,error.code==='ENOENT'?404:400,{error:error.code==='ENOENT'?'Não encontrado':'Não foi possível processar a solicitação'});}}
 const server=http.createServer((req,res)=>{handler(req,res).catch(error=>{console.error(error);if(!res.headersSent)send(res,500,{error:'Erro interno'});else res.destroy();});});
 server.headersTimeout=15_000;
