@@ -230,6 +230,19 @@ async function handler(req,res){try{
       if(existing)Object.assign(existing,item);else state.properties.push(item);
       await save();for(const src of removed){if(!kept.includes(src)&&src.startsWith('/media/'))await unlink(path.join(mediaDir,path.basename(src))).catch(()=>{});}await audit(req,'property-save','success',{propertyId:item.id,editing:!!existing,photos:item.photos.length});return send(res,200,{item});
     }
+    if(url.pathname==='/api/admin/property-delete'&&req.method==='POST'){
+      const input=JSON.parse((await body(req,1024)).toString('utf8'));
+      const id=typeof input.id==='string'&&/^[a-f0-9-]{8,36}$/.test(input.id)?input.id:null;
+      const index=id?state.properties.findIndex(property=>property.id===id):-1;
+      if(index<0)return send(res,404,{error:'Imóvel não encontrado'});
+      const [removed]=state.properties.splice(index,1);
+      await save();
+      for(const src of removed.photos||[]){
+        if(typeof src==='string'&&src.startsWith('/media/')&&!state.properties.some(property=>(property.photos||[]).includes(src)))await unlink(path.join(mediaDir,path.basename(src))).catch(()=>{});
+      }
+      await audit(req,'property-delete','success',{propertyId:removed.id,photos:(removed.photos||[]).length});
+      return send(res,200,{ok:true});
+    }
     if(url.pathname==='/api/admin/status'&&req.method==='POST'){
       const input=JSON.parse((await body(req,1024)).toString('utf8'));
       if(!['published','pausar','vendido','alugado'].includes(input.status))return send(res,400,{error:'Status inválido'});
