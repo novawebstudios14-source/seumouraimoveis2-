@@ -30,8 +30,8 @@
             <p class="listing-location">${escape(propertyLocation)}</p>
             <div class="catalog-price"><span>${priceLabel}</span><strong>${money(item.preco)}</strong></div>
             <div class="featured-actions">
-              <a class="button catalog-details-button" href="${detail}">Ver imóvel completo <span aria-hidden="true">→</span></a>
-              <a class="button cream" href="https://wa.me/5594992972083?text=${encodeURIComponent(message+'\\n\\nVer imóvel: '+new URL(detail,window.location.href).href)}" target="_blank" rel="noopener">Tenho interesse <span aria-hidden="true">↗</span></a>
+              <a class="button catalog-details-button" href="${detail}">Ver imóvel completo <span aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></span></a>
+              <a class="button cream" href="https://wa.me/5594992972083?text=${encodeURIComponent(message+'\\n\\nVer imóvel: '+new URL(detail,window.location.href).href)}" target="_blank" rel="noopener">Tenho interesse <span aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M17 7l-10 10"/><path d="M8 7h9v9"/></svg></span></a>
             </div>
             <p class="fine">Valor e disponibilidade sujeitos à confirmação.</p>
           </div>

@@ -16,8 +16,8 @@ function addProperty(property){
   const title=document.createElement('h2');const titleLink=document.createElement('a');titleLink.href=detailUrl;titleLink.textContent=property.titulo;title.append(titleLink);
   const place=document.createElement('p');place.className='listing-location';place.textContent=[property.bairro,property.cidade].filter(Boolean).join(' · ');heading.append(label,title,place);
   const price=document.createElement('div');price.className='catalog-price';const caption=document.createElement('span');caption.textContent=property.finalidade==='aluguel'?'Aluguel mensal':'Valor de venda';const amount=document.createElement('strong');amount.textContent=BRL.format(property.preco);price.append(caption,amount);
-  const link=document.createElement('a');link.className='button cream';link.target='_blank';link.rel='noopener noreferrer';link.textContent='Tenho interesse ↗';link.href='https://wa.me/5594992972083?text='+encodeURIComponent(`Olá, Seu Moura! Tenho interesse em ${property.titulo}. Ver imóvel: ${location.href.split('#')[0]}#${article.id}`);
-  const details=document.createElement('a');details.href=detailUrl;details.className='button catalog-details-button';details.textContent='Ver imóvel completo →';
+  const link=document.createElement('a');link.className='button cream';link.target='_blank';link.rel='noopener noreferrer';link.innerHTML='Tenho interesse <span aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M17 7l-10 10"/><path d="M8 7h9v9"/></svg></span>';link.href='https://wa.me/5594992972083?text='+encodeURIComponent(`Olá, Seu Moura! Tenho interesse em ${property.titulo}. Ver imóvel: ${location.href.split('#')[0]}#${article.id}`);
+  const details=document.createElement('a');details.href=detailUrl;details.className='button catalog-details-button';details.innerHTML='Ver imóvel completo <span aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></span>';
   body.append(heading,price,details,link);article.append(media,body);
   grid.append(article);
 }
