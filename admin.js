@@ -37,4 +37,17 @@ $('logout').onclick=async()=>{try{await api('logout',{method:'POST',body:'{}'});
 $('property-form').addEventListener('input',updatePublishState);
 $('property-form').addEventListener('change',updatePublishState);
 updatePublishState();
-api('session').then(async data=>{csrf=data.csrf;show(true);await load();await loadAiConfig();}).catch(()=>{clearMessage();show(false);});
+function finishAdminLoading(){
+  const state=window.mouraLoading;
+  const loader=document.getElementById('moura-loader');
+  if(!state||!loader||!document.documentElement.classList.contains('moura-loading'))return;
+  const logo=loader.querySelector('.moura-loader__original');
+  const reveal=logo?.getAnimations?.().find(animation=>animation.animationName==='moura-brand');
+  const brandReady=reveal?reveal.finished.catch(()=>{}):new Promise(resolve=>setTimeout(resolve,1900));
+  brandReady.then(()=>setTimeout(()=>{
+    if(!document.documentElement.classList.contains('moura-loading'))return;
+    loader.classList.add('is-leaving');
+    setTimeout(()=>{clearTimeout(state.timer);state.release();},720);
+  },300));
+}
+api('session').then(async data=>{csrf=data.csrf;show(true);await load();await loadAiConfig();}).catch(()=>{clearMessage();show(false);}).finally(finishAdminLoading);
