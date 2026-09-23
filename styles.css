@@ -381,3 +381,7 @@ body.lightbox-open{overflow:hidden}
   .detail-lightbox-arrow:hover,.detail-lightbox-arrow:focus-visible{transform:none}
   .detail-lightbox-prev{left:16px}.detail-lightbox-next{right:16px}
 }
+
+.detail-share{width:100%;margin-top:12px;background:transparent;border-color:#4a4a4a;color:var(--ink);font-weight:700}
+.detail-share:hover,.detail-share:focus-visible{background:#191919;color:#fff;border-color:#191919}
+.detail-share .icon{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
