@@ -49,6 +49,7 @@ function openConfirmation(fields){
   const items=[
     ['Título',pendingFields.titulo],['Finalidade',pendingFields.finalidade==='aluguel'?'Aluguel':'Venda'],
     ['Tipo',pendingFields.tipo],['Bairro',pendingFields.bairro],['Cidade',pendingFields.cidade],
+    ['Localização no mapa',pendingFields.localizacao_mapa,'wide'],
     ['Preço',priceForReview(pendingFields.preco)],['Quartos',pendingFields.quartos],['Banheiros',pendingFields.banheiros],
     ['Área',pendingFields.area?pendingFields.area+' m²':''],['Diferenciais',pendingFields.detalhes,'wide'],
     ['Descrição',pendingFields.descricao,'wide']

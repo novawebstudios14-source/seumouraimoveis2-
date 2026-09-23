@@ -42,6 +42,23 @@ function render(p){
   const contact=element('a','button cream detail-floating-cta');contact.innerHTML='Tenho interesse <span aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M17 7l-10 10"/><path d="M8 7h9v9"/></svg></span>';contact.href='https://wa.me/5594992972083?text='+encodeURIComponent(`Olá, Seu Moura! Tenho interesse em ${p.titulo}. Ver imóvel: ${location.href}`);contact.target='_blank';contact.rel='noopener noreferrer';contact.setAttribute('aria-label','Falar no WhatsApp sobre '+p.titulo);layout.append(left,right);
   root.append(header,layout,contact);
   if(p.descricao?.trim()){const section=element('section','detail-description');section.append(element('h2','','Sobre este imóvel'),element('p','',p.descricao));root.append(section);}
+  if(p.localizacao_mapa?.trim()){
+    const mapLocation=p.localizacao_mapa.trim();
+    const mapSection=element('section','detail-map');
+    const mapHeading=element('div','detail-map-heading');
+    mapHeading.append(element('h2','','Localização do imóvel'),element('p','',mapLocation));
+    const frame=document.createElement('iframe');
+    frame.title='Mapa com a localização de '+p.titulo;
+    frame.loading='lazy';
+    frame.referrerPolicy='no-referrer-when-downgrade';
+    frame.src='https://www.google.com/maps?q='+encodeURIComponent(mapLocation)+'&output=embed';
+    const openMap=element('a','button catalog-details-button','Abrir no Google Maps');
+    openMap.href='https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(mapLocation);
+    openMap.target='_blank';
+    openMap.rel='noopener noreferrer';
+    mapSection.append(mapHeading,frame,openMap);
+    root.append(mapSection);
+  }
   root.append(element('p','catalog-note','Valores e disponibilidade sujeitos à confirmação com a equipe da Seu Moura.'));
 }
 if(!id||!/^[a-f0-9-]{8,36}$/.test(id)){root.textContent='Imóvel não encontrado.';}else fetch('./api/properties',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('Falha ao consultar imóveis');return r.json();}).then(data=>{const p=data.properties?.find(item=>item.id===id);if(!p){root.textContent='Este imóvel não está disponível.';return;}render(p);}).catch(()=>{root.textContent='Não foi possível carregar o imóvel. Tente novamente.';});
