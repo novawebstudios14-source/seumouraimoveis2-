@@ -400,3 +400,13 @@ body.lightbox-open{overflow:hidden}
   .detail-map-heading p{margin-top:8px;text-align:left}
   .detail-map iframe{height:330px}
 }
+
+
+/* Local SEO FAQ */
+.seo-faq{padding-top:80px;padding-bottom:90px}
+.seo-faq .section-head{margin-bottom:36px}
+.seo-faq-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line)}
+.seo-faq article{background:var(--surface);padding:30px}
+.seo-faq h3{font-family:var(--display,var(--serif));font-size:24px;line-height:1.2;margin-bottom:12px}
+.seo-faq article p{color:var(--muted);font-size:15px;line-height:1.7}
+@media(max-width:720px){.seo-faq{padding-top:58px;padding-bottom:64px}.seo-faq-grid{grid-template-columns:1fr}.seo-faq article{padding:24px 20px}.seo-faq h3{font-size:22px}}
