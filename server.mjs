@@ -140,6 +140,12 @@ function execute(sender,text,photo){
 
 function baseHeaders(){return {'x-content-type-options':'nosniff','referrer-policy':'strict-origin-when-cross-origin','permissions-policy':'camera=(), microphone=(), geolocation=()','x-frame-options':'DENY',...(secureCookie?{'strict-transport-security':'max-age=31536000; includeSubDomains'}:{})};}
 function send(res,status,body,type='application/json; charset=utf-8'){res.writeHead(status,{'content-type':type,'cache-control':'no-store',...baseHeaders()});res.end(type.startsWith('application/json')?JSON.stringify(body):body);}
+function xmlEscape(value){return String(value??'').replace(/[<>&'"]/g,char=>({'<':'&lt;','>':'&gt;','&':'&amp;',"'":'&apos;','"':'&quot;'}[char]));}
+function htmlEscape(value){return String(value??'').replace(/[<>&"]/g,char=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[char]));}
+function requestOrigin(req){const trusted=process.env.TRUST_PROXY==='1';const forwardedHost=trusted?String(req.headers['x-forwarded-host']||'').split(',')[0].trim():'';const host=forwardedHost||String(req.headers.host||'').split(',')[0].trim();const forwarded=trusted?String(req.headers['x-forwarded-proto']||'').split(',')[0].trim():'';const protocol=forwarded==='http'||forwarded==='https'?forwarded:(secureCookie?'https':'http');return protocol+'://'+host;}
+function jsonLd(data){return '<script type="application/ld+json">'+JSON.stringify(data).replace(/</g,'\\u003c')+'</script>';}
+function compactDescription(value,fallback){const text=String(value||fallback||'').replace(/\s+/g,' ').trim();return text.length>158?text.slice(0,155).replace(/\s+\S*$/,'')+'...':text;}
+
 async function body(req,max=1024*1024){let chunks=[],size=0;for await(const chunk of req){size+=chunk.length;if(size>max)throw Error('Corpo grande demais');chunks.push(chunk);}return Buffer.concat(chunks);}
 async function storePhoto(bytes){if(bytes.length>10*1024*1024)throw Error('Foto grande demais (máximo 10 MB)');let image;try{image=sharp(bytes,{limitInputPixels:40_000_000,failOn:'warning'});const metadata=await image.metadata();if(!['jpeg','png','webp'].includes(metadata.format)||!metadata.width||!metadata.height)throw Error('Formato de imagem inválido');}catch{throw Error('Imagem inválida ou corrompida');}const safe=await image.rotate().resize({width:2400,height:2400,fit:'inside',withoutEnlargement:true}).jpeg({quality:82,mozjpeg:true}).toBuffer();await mkdir(mediaDir,{recursive:true});const name=randomUUID()+'.jpg';await writeFile(path.join(mediaDir,name),safe,{flag:'wx',mode:0o600});return '/media/'+name;}
 async function metaPhoto(mediaId){if(!accessToken)throw Error('WHATSAPP_ACCESS_TOKEN não configurado');const headers={Authorization:`Bearer ${accessToken}`};const info=await fetch(`https://graph.facebook.com/${apiVersion}/${encodeURIComponent(mediaId)}`,{headers});if(!info.ok)throw Error('Falha ao consultar mídia');const meta=await info.json();if(!['image/jpeg','image/png','image/webp'].includes(meta.mime_type))throw Error('Formato de imagem não suportado');const download=await fetch(meta.url,{headers});if(!download.ok)throw Error('Falha ao baixar foto');return storePhoto(Buffer.from(await download.arrayBuffer()));}
@@ -153,6 +159,9 @@ async function webhook(req,res){if(!appSecret)return send(res,503,{error:'Config
 async function handler(req,res){try{
   const url=new URL(req.url,'http://localhost');
   if(url.pathname==='/health'&&req.method==='GET')return send(res,200,{ok:true,service:'seu-moura'});
+  if(url.pathname==='/robots.txt'&&req.method==='GET'){const origin=requestOrigin(req);res.writeHead(200,{'content-type':'text/plain; charset=utf-8','cache-control':'public, max-age=3600',...baseHeaders()});return res.end('User-agent: *\\nAllow: /\\nDisallow: /admin.html\\nDisallow: /api/admin/\\nSitemap: '+origin+'/sitemap.xml\\n');}
+  if(url.pathname==='/sitemap.xml'&&req.method==='GET'){const origin=requestOrigin(req);const pages=[{loc:origin+'/',lastmod:'2026-09-23'},{loc:origin+'/imoveis.html',lastmod:'2026-09-23'},...state.properties.filter(p=>p.status==='published').map(p=>({loc:origin+'/imovel.html?id='+encodeURIComponent(p.id),lastmod:p.updatedAt||new Date().toISOString()}))];const xml='<?xml version="1.0" encoding="UTF-8"?>\\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\\n'+pages.map(page=>'  <url><loc>'+xmlEscape(page.loc)+'</loc><lastmod>'+xmlEscape(page.lastmod)+'</lastmod></url>').join('\\n')+'\\n</urlset>';res.writeHead(200,{'content-type':'application/xml; charset=utf-8','cache-control':'public, max-age=900',...baseHeaders()});return res.end(xml);}
+
   if(url.pathname.startsWith('/api/admin/')){
     res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Frame-Options','DENY');
     if(url.pathname==='/api/admin/login'&&req.method==='POST'){
@@ -264,7 +273,7 @@ async function handler(req,res){try{
   let filename;
   if(url.pathname.startsWith('/media/')){const publicPath='/media/'+path.basename(url.pathname);if(!state.properties.some(property=>property.status==='published'&&(property.photos||[]).includes(publicPath)))return send(res,404,{error:'Não encontrado'});filename=path.join(mediaDir,path.basename(url.pathname));}
   else {const pathname=decodeURIComponent(url.pathname==='/'?'/index.html':url.pathname);filename=path.resolve(root,'.'+pathname);if(!filename.startsWith(root+path.sep)||filename.startsWith(dataDir+path.sep)||path.basename(filename).startsWith('.')||!['.html','.css','.js','.svg','.jpg','.jpeg','.png','.webp','.mov'].includes(path.extname(filename)))return send(res,404,{error:'Não encontrado'});}
-  const extension=path.extname(filename);const headers={'content-type':mime[extension]||'application/octet-stream',...baseHeaders()};if(extension==='.html'&&url.pathname!=='/admin.html')headers['content-security-policy']="default-src 'self'; script-src 'self' 'sha256-Lw9V+yTCkJJ28lw8CDUjLPV7Ukz/j4VG8MQfAEeOwx4='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; media-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests";if(['.html','.js','.css'].includes(extension))headers['cache-control']='no-store';else headers['cache-control']='public, max-age=3600';
+  const extension=path.extname(filename);const headers={'content-type':mime[extension]||'application/octet-stream',...baseHeaders()};if(extension==='.html'&&url.pathname!=='/admin.html')headers['content-security-policy']="default-src 'self'; script-src 'self' 'sha256-Lw9V+yTCkJJ28lw8CDUjLPV7Ukz/j4VG8MQfAEeOwx4='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; frame-src https://www.google.com https://maps.google.com; media-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests";if(['.html','.js','.css'].includes(extension))headers['cache-control']='no-store';else headers['cache-control']='public, max-age=3600';
   if(extension==='.mov'){
     const info=await stat(filename);headers['accept-ranges']='bytes';
     const requested=req.headers.range;
@@ -280,7 +289,49 @@ async function handler(req,res){try{
     }
     headers['content-length']=String(info.size);
   }
-  const file=await readFile(filename);res.writeHead(200,headers);if(req.method==='HEAD')return res.end();res.end(file);
+  let file=await readFile(filename);
+  if(extension==='.html'&&url.pathname!=='/admin.html'){
+    let html=file.toString('utf8');
+    const origin=requestOrigin(req);
+    const canonicalPath=url.pathname==='/'?'/':url.pathname;
+    let canonical=origin+canonicalPath;
+    let extra='';
+    if(url.pathname==='/imovel.html'){
+      const id=url.searchParams.get('id');
+      const property=state.properties.find(p=>p.status==='published'&&p.id===id);
+      if(property){
+        const f=property.fields||{};
+        canonical=origin+'/imovel.html?id='+encodeURIComponent(property.id);
+        const intent=f.finalidade==='aluguel'?'para alugar':'à venda';
+        const title=(f.tipo||'Imóvel')+' '+intent+' em '+(f.bairro||'Marabá')+', Marabá | Seu Moura';
+        const fallback='Veja fotos, preço e detalhes deste '+String(f.tipo||'imóvel').toLocaleLowerCase('pt-BR')+' '+intent+' em '+(f.bairro||'Marabá')+', Marabá, PA.';
+        const description=compactDescription(f.descricao,fallback);
+        const images=(property.photos||[]).map(src=>origin+src);
+        const listing={'@context':'https://schema.org','@graph':[{'@type':'RealEstateListing','@id':canonical+'#listing',name:f.titulo,description,url:canonical,dateModified:property.updatedAt,image:images,about:{'@type':f.tipo==='Apartamento'?'Apartment':f.tipo==='Casa'?'House':'Residence',name:f.titulo,address:{'@type':'PostalAddress',addressLocality:f.cidade||'Marabá',addressRegion:'PA',addressCountry:'BR'},numberOfBedrooms:f.quartos,numberOfBathroomsTotal:f.banheiros,floorSize:{'@type':'QuantitativeValue',value:f.area,unitCode:'MTK'}},offers:{'@type':'Offer',price:f.preco,priceCurrency:'BRL',availability:'https://schema.org/InStock'}},{'@type':'BreadcrumbList',itemListElement:[{'@type':'ListItem',position:1,name:'Início',item:origin+'/'},{'@type':'ListItem',position:2,name:'Imóveis em Marabá',item:origin+'/imoveis.html'},{'@type':'ListItem',position:3,name:f.titulo,item:canonical}]}]};
+        html=html.replace(/<title>[^<]*<\/title>/,'<title>'+htmlEscape(title)+'</title>').replace(/<meta name="description" content="[^"]*">/,'<meta name="description" content="'+htmlEscape(description)+'">');
+        extra+='<meta property="og:title" content="'+htmlEscape(title)+'"><meta property="og:description" content="'+htmlEscape(description)+'"><meta property="og:type" content="website"><meta property="og:locale" content="pt_BR">'+(images[0]?'<meta property="og:image" content="'+htmlEscape(images[0])+'">':'')+'<meta name="twitter:card" content="summary_large_image">'+jsonLd(listing);
+      }
+    }else if(url.pathname==='/'||url.pathname==='/index.html'){
+      canonical=origin+'/';
+      extra+=jsonLd({'@context':'https://schema.org','@graph':[
+        {'@type':['RealEstateAgent','LocalBusiness'],'@id':origin+'/#business',name:'Seu Moura Imóveis',url:origin+'/',telephone:'+55 94 99297-2083',email:'contato@seumouraimoveis.com.br',address:{'@type':'PostalAddress',streetAddress:'Rua Afro Sampaio, 2152, Sala G',addressLocality:'Marabá',addressRegion:'PA',addressCountry:'BR'},areaServed:{'@type':'City',name:'Marabá'},priceRange:'$$$'},
+        {'@type':'WebSite','@id':origin+'/#website',url:origin+'/',name:'Seu Moura Imóveis',inLanguage:'pt-BR',publisher:{'@id':origin+'/#business'}},
+        {'@type':'FAQPage',mainEntity:[
+          {'@type':'Question',name:'Como comprar imóvel em Marabá?',acceptedAnswer:{'@type':'Answer',text:'Consulte os imóveis disponíveis, escolha as opções de interesse e fale com a equipe da Seu Moura Imóveis para receber atendimento durante a negociação.'}},
+          {'@type':'Question',name:'Há casas para alugar em Marabá?',acceptedAnswer:{'@type':'Answer',text:'O catálogo reúne imóveis publicados para compra e aluguel em Marabá, conforme a disponibilidade atual.'}},
+          {'@type':'Question',name:'Em quais bairros de Marabá vocês trabalham?',acceptedAnswer:{'@type':'Answer',text:'Os imóveis são identificados por bairro e região para facilitar a busca em diferentes áreas de Marabá.'}},
+          {'@type':'Question',name:'Como anunciar um imóvel em Marabá?',acceptedAnswer:{'@type':'Answer',text:'Entre em contato com a Seu Moura Imóveis para enviar as informações e solicitar a avaliação do imóvel.'}}
+        ]}
+      ]});
+    }else if(url.pathname==='/imoveis.html'){
+      const items=state.properties.filter(p=>p.status==='published').map((p,index)=>({'@type':'ListItem',position:index+1,name:p.fields?.titulo||'Imóvel em Marabá',url:origin+'/imovel.html?id='+encodeURIComponent(p.id)}));
+      extra+=jsonLd({'@context':'https://schema.org','@type':'CollectionPage',name:'Imóveis em Marabá para comprar ou alugar',url:canonical,mainEntity:{'@type':'ItemList',numberOfItems:items.length,itemListElement:items}});
+    }
+    extra='<link rel="canonical" href="'+htmlEscape(canonical)+'"><meta property="og:url" content="'+htmlEscape(canonical)+'">'+extra;
+    html=html.replace('</head>',extra+'</head>');
+    file=Buffer.from(html);
+  }
+  res.writeHead(200,headers);if(req.method==='HEAD')return res.end();res.end(file);
 }catch(error){console.error(error);send(res,error.code==='ENOENT'?404:400,{error:error.code==='ENOENT'?'Não encontrado':'Não foi possível processar a solicitação'});}}
 const server=http.createServer((req,res)=>{handler(req,res).catch(error=>{console.error(error);if(!res.headersSent)send(res,500,{error:'Erro interno'});else res.destroy();});});
 server.headersTimeout=15_000;
